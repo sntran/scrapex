@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>README – Scrapex v0.0.1</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.10.0">
+    <link rel="stylesheet" href="dist/app.css" />
+    <script src="dist/sidebar_items.js"></script>
+  </head>
+  <body data-type="extras">
+
+<div class="main">
+<button class="sidebar-toggle">
+  <i class="icon-menu"></i>
+</button>
+<section class="sidebar">
+  <button class="sidebar-toggle">
+    <i class="icon-menu"></i>
+  </button>
+
+  
+  <a href="extra-api-reference.html" class="sidebar-projectLink">
+    <div class="sidebar-projectDetails">
+      <h1 class="sidebar-projectName">
+        Scrapex
+      </h1>
+      <h2 class="sidebar-projectVersion">
+        v0.0.1
+      </h2>
+    </div>
+    
+      <img src="assets/logo.png" alt="Scrapex" class="sidebar-projectImage">
+    
+  </a>
+
+  <div class="sidebar-search">
+    <i class="icon-search"></i>
+    <input type="text" class="sidebar-searchInput" placeholder="search" autocomplete="off" />
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list" href="#full-list">Pages</a></li>
+
+    
+      <li><a id="modules-list" href="#full-list">Modules</a></li>
+    
+
+    
+
+    
+  </ul>
+
+  <ul id="full-list" class="sidebar-fullList"></ul>
+  <div class="sidebar-noResults"></div>
+</section>
+
+<section class="content">
+  <div id="content" class="content-inner">
+
+
+<h1>Scrapex</h1>
+<p>An open source and collaborative framework for extracting the data you need from websites. In a fast, simple, yet extensible way.</p>
+<h2 id="Features"> Features</h2><h3>Fast and powerful</h3>
+<p>Write the rules to extract the data and let Scrapex do the rest.</p>
+<h3>Easily extensible</h3>
+<p>Extensible by design, plug new functionality easily without having to touch the core.</p>
+<h3>Portable, Elixir</h3>
+<p>Written in Elixir and runs on Linux, Windows, Mac, BSD, and embedded devices.</p>
+<h2 id="Build-your-own-webcrawlers"> Build your own webcrawlers</h2><pre><code class="elixir">defmodule BlogSpider do
+  use GenSpider
+
+  @start_urls [&quot;http://blog.scrapinghub.com&quot;]
+
+  def parse(response, %{&quot;selectors&quot; =&gt; selectors}) do
+    response
+    |&gt; css(&quot;ul li a::attr(\&quot;href\&quot;)&quot;)
+    |&gt; re(~r/.*/\d\d\d\d/\d\d/$/)
+    |&gt; Enum.map(fn(url) -&gt;
+      Scrapex.Request(urljoin(url), &amp;parse_titles/1)
+    end)
+  end
+
+  defp parse_titles(response) do
+    response
+    |&gt; css(&quot;div.entries &gt; ul &gt; li a::text&quot;)
+    |&gt; extract()
+    |&gt; Enum.map(fn(post_title) -&gt; %{&quot;title&quot; =&gt; post_title} end)
+  end
+end
+
+# Start the spider
+opts = name: :webscrapper
+{:ok, pid} = GenSpider.start_link(BlogSpider, sitemap, opts)
+
+# This is the client
+GenSpider.export(pid, :json)
+#=&gt; &quot;[{} | _]&quot;</code></pre>
+
+    <footer class="footer">
+      <p>
+        <span class="line">
+          Built using
+          <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" rel="help" target="_blank">ExDoc</a> (v0.10.0),
+        </span>
+        <span class="line">
+          designed by
+          <a href="https://twitter.com/dignifiedquire" target="_blank" title="@dignifiedquire">Friedel Ziegelmayer</a>.
+          </span>
+      </p>
+    </footer>
+  </div>
+</section>
+</div>
+    <script src="dist/app.js"></script>
+  </body>
+</html>
+

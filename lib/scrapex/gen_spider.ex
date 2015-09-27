@@ -1,0 +1,339 @@
+defmodule Scrapex.GenSpider do
+  alias Scrapex.GenSpider
+  @moduledoc """
+  A behaviour module for implementing a web data extractor.
+
+  A GenSpider is a process as any other Elixir process and it can be
+  used to crawl a list of URLs, run callback to parse the response,
+  and repeat on an interval.
+
+  ## Example
+
+  The GenSpider behaviour abstracts the common data extraction process.
+  Users are only required to implement the callbacks and functionality
+  they are interested in.
+
+  Imagine we want a GenSpider that takes a list of selectors exported
+  from http://webscraper.io/ and follow them to get the data.
+
+      defmodule WebScrapper do
+        use GenSpider
+
+        # Callbacks
+
+        def init(%{"selectors"=> selectors}) do
+          %{"selectors" => selectors, "data" => []}
+        end
+        
+        def parse(response, %{"selectors" => selectors}) do
+          # Wrap the HTML with a Css selector engine.
+          engine = GenSpider.CssSelector(response)
+          Enum.map(selectors, fn(selector) ->
+            selector
+            |> engine.select()
+            |> engine.extract()
+          end)
+        end
+      end
+
+      # Start the spider
+      sitemap = File.read!("sitemap.json") |> Poison.decode!
+      opts =  name: :webscrapper,
+              urls: [sitemap["siteUrl"]], 
+              interval: 3600
+      {:ok, pid} = GenSpider.start_link(WebScrapper, sitemap, opts)
+
+
+      # This is the client
+      GenSpider.export(pid, :json)
+      #=> "[{} | _]"
+
+  We start our `WebScrapper` by calling `start_link/3`, passing the
+  module with the spider implementation and its initial argument (a
+  list representing the selectors to follow and grab). We also pass
+  a option list to register the spider with a name, and a list of urls
+  to start following, and an interval for refetching.
+
+  We can get the data from the spider by calling `GenSpider.export/2`
+  with the `pid` of the spider, and the output format. `GenSpider`
+  supports outputting JSON, CSV and XML. 
+
+  ## Callbacks
+
+  There are 3 callbacks required to be implemented in a `GenSpider`.
+  By adding `use GenSpider` to your module, all 6 callbacks will be
+  automatically defined, leaving it up to you to implement the ones
+  you want to customize. The callbacks are:
+
+    * `init(args)` - invoked when the spider is started.
+
+      It must return:
+      -  `{:ok, state}`
+      -  `{:ok, state, timeout}`
+      -  `:ignore`
+      -  `{:stop, reason}`
+
+    * `parse(response, state)` - invoked after the spider has requested
+      a URL successfully with a HTML in `response`.
+
+      It must return:
+      -  `{:ok, new_state}`
+      -  `{:ignore, new_state}`
+      -  `{:stop, reason, new_state}`
+
+    * `handle_export(type, state)` - invoked to handle `export` call.
+
+      It must return:
+      -  `{:ok, data, new_state}`
+      -  `{:stop, reason, new_state}`
+      -  `{:stop, reason, data, new_state}`
+
+    * `terminate(reason, state)` - called when the server is about to
+      terminate, useful for cleaning up. It must return `:ok`.
+
+    * `code_change(old_vsn, state, extra)` - called when the application
+      code is being upgraded live (hot code swapping).
+
+      It must return:
+      -  `{:ok, new_state}`
+      -  `{:error, reason}`
+
+  ## Client / Server APIs
+
+  Although in the example above we have used `GenSpider.start_link/3`
+  and friends to directly start and communicate with the spider, most 
+  of the time we don't call the `GenSpider` functions directly.
+  Instead, we wrap the calls in new functions representing the public
+  API of the spider.
+
+  Here is a better implementation of our WebScrapper module:
+
+      defmodule WebScrapper do
+        use GenSpider
+
+        # Client
+        def start_link(sitemap) do
+          opts =  name: :webscrapper,
+              urls: [sitemap["siteUrl"]], 
+              interval: 3600
+          GenSpider.start_link(__MODULE__, sitemap, opts)
+        end
+
+        def json(pid) do
+          GenSpider.export(pid, :json)
+        end
+        
+        # Server (callbacks)
+
+        def init(%{"selectors"=> selectors}) do
+          %{"selectors" => selectors, "data" => []}
+        end
+        
+        def parse(response, %{"selectors" => selectors}) do
+           # Wrap the HTML with a Css selector engine.
+          engine = GenSpider.CssSelector(response)
+          Enum.map(selectors, fn(selector) ->
+            selector
+            |>  engine.select()
+            |> engine.extract()
+          end)
+        end
+
+        def handle_export(:json, state) do
+          # Call the default implementation from GenSpider
+          super(:json, state)
+        end
+      end
+
+  In practice, it is common to have both server and client functions in
+  the same module. If the server and/or client implementations are 
+  growing complex, you may want to have them in different modules.
+  """
+
+  @typedoc "Options used by the `start*` functions"
+  @type options :: [options]
+
+  @type option :: {:name, GenServer.name} |
+                  {:timeout, timeout} |
+                  {:interval, non_neg_integer}
+
+  @typedoc "The spider reference"
+  @type spider :: pid | GenServer.name | {atom, node}
+
+  @typedoc "The internal state of the spider"
+  @type state :: any
+
+  @typedoc "The response from a request to a URL"
+  @type response :: binary
+
+  @typedoc "Exportable formats"
+  @type format :: :json | :csv | :xml
+
+  # `GenSpider` is based on `GenServer`.
+  use GenServer
+
+  # Define the callbacks for `GenSpider`
+  @callback init(any) ::
+    {:ok, state} | {:ok, state, timeout | :hibernate} |
+    :ignore | {:stop, reason :: term}
+
+  @callback parse(response, state) ::
+    {:ok, state} | {:ignore, state} |
+    {:stop, reason :: term, state}
+
+  @callback handle_export(format, state) ::
+    {:ok, any, state} |
+    {:stop, reason :: term, state} | {:stop, reason :: term, any, state}
+
+  @doc """
+  This callback is the same as the `GenServer` equivalent and is used to change
+  the state when loading a different version of the callback module.
+  """
+  @callback code_change(any, any, state) :: {:ok, state}
+
+  @doc """
+  This callback is the same as the `GenServer` equivalent and is called when the
+  process terminates. The first argument is the reason the process is about
+  to exit with.
+  """
+  @callback terminate(any, state) :: any
+
+  @doc false
+  defmacro __using__(_) do
+    quote location: :keep do
+      @behaviour GenSpider
+
+      @doc false
+      def init(args) do
+        {:ok, args}
+      end
+
+      @doc false
+      def parse(response, state) do
+        # We do this to trick dialyzer to not complain about non-local returns.
+        reason = {:bad_call, response}
+        case :erlang.phash2(1, 1) do
+          0 -> exit(reason)
+          1 -> {:stop, reason, state}
+        end
+      end
+
+      @doc false
+      def handle_export(_type, state) do
+        # We do this to trick dialyzer to not complain about non-local returns.
+        reason = :bad_call
+        case :erlang.phash2(1, 1) do
+          0 -> exit(reason)
+          1 -> {:stop, reason, state}
+        end
+      end
+
+      @doc false
+      def terminate(_reason, _state) do
+        :ok
+      end
+
+      @doc false
+      def code_change(_old, state, _extra) do
+        {:ok, state}
+      end
+
+      defoverridable [init: 1, parse: 2, handle_export: 2,
+                      terminate: 2, code_change: 3]
+    end
+  end
+
+  @doc """
+  Starts a `GenSpider` process linked to the current process.
+
+  This is often used to start the `GenSpider` as part of a supervision 
+  tree.
+
+  Once the spider is started, it calls the `init/1` function in the 
+  given `module` passing the given `args` to initialize it. To ensure 
+  a synchronized start-up procedure, this function does not return 
+  until `init/1` has returned.
+
+  Note that a `GenSpider` started with `start_link/3` is linked to the
+  parent process and will exit in case of crashes. The GenSpider will 
+  also exit due to the `:normal` reasons in case it is configured to 
+  trap exits in the `init/1` callback.
+
+  ## Options
+
+  The `:name` option is used for name registration as described in the 
+  module documentation. If the option `:timeout` option is present, 
+  the spider is allowed to spend the given milliseconds initializing 
+  or it will be terminated and the start function will return 
+  `{:error, :timeout}`.
+
+  The `:urls` defines a list of URLs for the spider to start from.
+
+  If the `:inverval` option is present, the spider will repeat itself
+  after every number of seconds defined by the option. Note that it
+  will only repeat if it's not currently running a crawl.
+
+  ## Return values
+
+  If the spider is successfully created and initialized, the function 
+  returns `{:ok, pid}`, where pid is the pid of the spider. If there 
+  already exists a process with the specified spider name, the 
+  function returns `{:error, {:already_started, pid}}` with the pid of 
+  that process.
+
+  If the `init/1` callback fails with `reason`, the function returns
+  `{:error, reason}`. Otherwise, if it returns `{:stop, reason}`or 
+  `:ignore`, the process is terminated and the function returns
+  `{:error, reason}` or `:ignore`, respectively.
+  """
+  @spec start_link(module, any, options) :: GenServer.on_start
+  def start_link(module, args, options \\ []) when is_atom(module) and is_list(options) do
+    GenServer.start_link(__MODULE__, {module, args}, options)
+  end
+
+  @doc """
+  Starts a `GenSpider` without links (outside of a supervision tree).
+  See `start_link/3` for more information.
+  """
+  @spec start(module, any, options) :: GenServer.on_start
+  def start(module, args, options \\ []) when is_atom(module) and is_list(options) do
+    GenServer.start(__MODULE__, {module, args}, options)
+  end
+
+  @doc """
+  Exports the stored data with specific format
+  """
+  @spec export(spider, format) :: any
+  def export(spider, format) do
+    GenServer.call(spider, {:export, format})
+  end
+  
+  # GenServer callbacks
+
+  def init({module, args}) do
+    case apply(module, :init, [args]) do
+    # try do
+    #   apply(module, :init, [args])
+    # catch
+    #   :exit, reason ->
+    #     init_stop(starter, name, reason)
+    #   :error, reason ->
+    #     init_stop(starter, name, {reason, System.stacktrace()})
+    #   :throw, value ->
+    #     reason = {{:nocatch, value}, System.stacktrace()}
+    #     init_stop(starter, name, reason)
+    # else
+      {:ok, mod_state} ->
+        {:ok, {module, mod_state}}
+      {:ok, mod_state, timeout} ->
+        {:ok, {module, mod_state}, timeout}
+      :ignore ->
+        :ignore
+      {:stop, reason} ->
+        {:stop, reason}
+      other ->
+        other
+    end
+  end
+
+end
