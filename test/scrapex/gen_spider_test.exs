@@ -8,6 +8,10 @@ defmodule Scrapex.GenSpiderTest do
       def init(args) do
         {:ok, args}
       end
+
+      def parse(_, state) do
+        {:ok, state}
+      end
     end
 
     {:ok, pid} = GenSpider.start_link(GoodSpider, [])
@@ -38,10 +42,44 @@ defmodule Scrapex.GenSpiderTest do
   end
 
   test "default spider" do
-    defmodule Spider do
+    defmodule DoNothingSpider do
       use GenSpider
     end
-    {:ok, pid} = GenSpider.start(Spider, [])
+    {:ok, pid} = GenSpider.start(DoNothingSpider, [])
     assert is_pid(pid)
+  end
+
+  test "should start the crawling immediately" do
+    defmodule TestSpider do
+      use GenSpider
+
+      def parse(_, state) do
+        # Assert that this function is called.
+        assert state
+        {:ok, state}
+      end
+      
+    end
+
+    GenSpider.start(TestSpider, [])
+  end
+
+  defmodule Spider do
+    use GenSpider
+
+    def init(_) do
+      {:ok, []}
+    end
+
+    def parse(response, state) do
+      # Assert that this function is called.
+      assert false
+      {:ok, state}
+    end
+    
+  end
+
+  test "should get the HTML of the start URL(s)" do
+    GenSpider.start(Spider, [], [urls: ["http://www.example.com"]])
   end
 end

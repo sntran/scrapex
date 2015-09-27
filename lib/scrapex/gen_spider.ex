@@ -69,7 +69,7 @@ defmodule Scrapex.GenSpider do
 
       It must return:
       -  `{:ok, state}`
-      -  `{:ok, state, timeout}`
+      -  `{:ok, state, delay}`
       -  `:ignore`
       -  `{:stop, reason}`
 
@@ -212,10 +212,11 @@ defmodule Scrapex.GenSpider do
       def parse(response, state) do
         # We do this to trick dialyzer to not complain about non-local returns.
         reason = {:bad_call, response}
-        case :erlang.phash2(1, 1) do
-          0 -> exit(reason)
-          1 -> {:stop, reason, state}
-        end
+        # case :erlang.phash2(1, 1) do
+        #   0 -> exit(reason)
+        #   1 -> {:stop, reason, state}
+        # end
+        {:stop, reason, state}
       end
 
       @doc false
@@ -288,7 +289,7 @@ defmodule Scrapex.GenSpider do
   """
   @spec start_link(module, any, options) :: GenServer.on_start
   def start_link(module, args, options \\ []) when is_atom(module) and is_list(options) do
-    GenServer.start_link(__MODULE__, {module, args}, options)
+    do_start(:start_link, module, args, options)
   end
 
   @doc """
@@ -297,7 +298,23 @@ defmodule Scrapex.GenSpider do
   """
   @spec start(module, any, options) :: GenServer.on_start
   def start(module, args, options \\ []) when is_atom(module) and is_list(options) do
-    GenServer.start(__MODULE__, {module, args}, options)
+    do_start(:start, module, args, options)
+  end
+
+  @doc false
+  defp do_start(link, module, args, options) do
+    {name, opts} = Keyword.pop(options, :name)
+    init_args = {module, args, opts}
+    case name do
+      nil ->
+        apply(GenServer, link, [__MODULE__, init_args])
+      atom when is_atom(atom) ->
+        apply(GenServer, link, [__MODULE__, init_args, [name: atom]])
+      {:global, _} ->
+        apply(GenServer, link, [__MODULE__, init_args, [name: name]])
+      {:via, _, _} ->
+        apply(GenServer, link, [__MODULE__, init_args, [name: name]])
+    end
   end
 
   @doc """
@@ -310,7 +327,7 @@ defmodule Scrapex.GenSpider do
   
   # GenServer callbacks
 
-  def init({module, args}) do
+  def init({module, args, opts}) do
     case apply(module, :init, [args]) do
     # try do
     #   apply(module, :init, [args])
@@ -324,9 +341,14 @@ defmodule Scrapex.GenSpider do
     #     init_stop(starter, name, reason)
     # else
       {:ok, mod_state} ->
-        {:ok, {module, mod_state}}
-      {:ok, mod_state, timeout} ->
-        {:ok, {module, mod_state}, timeout}
+        # Return 0 timeout to trigger crawl immediately.
+        # This works regardless of interval option, since we always
+        # have a crawl. A crawl will use interval option to see if it
+        # needs to do the next one.
+        {:ok, {module, mod_state, opts}, 0}
+      {:ok, mod_state, delay} ->
+        # Delay the crawl by the value specified in return.
+        {:ok, {module, mod_state, opts}, delay}
       :ignore ->
         :ignore
       {:stop, reason} ->
@@ -335,5 +357,23 @@ defmodule Scrapex.GenSpider do
         other
     end
   end
+
+  @doc """
+  Called when a timeout occurs, usually when to start a crawl.
+
+  This is a `GenServer` callback called whenever any of the `init`,
+  `call`, or `cast` function is called with a timeout value.
+
+  The `GenSpider` uses the timeout value to trigger a crawl.
+  """
+  def handle_info(:timeout, {module, state, opts}) do
+    case apply(module, :parse, ["Hello", state]) do
+      {:stop, reason, state} ->
+        {:stop, reason, {module, state, opts}}
+      {:ok, state} ->
+        {:noreply, {module, state, opts}}
+    end
+  end
+  
 
 end
