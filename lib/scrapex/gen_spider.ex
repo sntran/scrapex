@@ -329,17 +329,6 @@ defmodule Scrapex.GenSpider do
 
   def init({module, args, opts}) do
     case apply(module, :init, [args]) do
-    # try do
-    #   apply(module, :init, [args])
-    # catch
-    #   :exit, reason ->
-    #     init_stop(starter, name, reason)
-    #   :error, reason ->
-    #     init_stop(starter, name, {reason, System.stacktrace()})
-    #   :throw, value ->
-    #     reason = {{:nocatch, value}, System.stacktrace()}
-    #     init_stop(starter, name, reason)
-    # else
       {:ok, mod_state} ->
         # Return 0 timeout to trigger crawl immediately.
         # This works regardless of interval option, since we always
@@ -368,8 +357,8 @@ defmodule Scrapex.GenSpider do
   """
   def handle_info(:timeout, {module, state, opts}) do
     case apply(module, :parse, ["Hello", state]) do
-      {:stop, reason, state} ->
-        {:stop, reason, {module, state, opts}}
+      {:stop, _reason, state} ->
+        {:stop, :normal, {module, state, opts}}
       {:ok, state} ->
         {:noreply, {module, state, opts}}
     end
