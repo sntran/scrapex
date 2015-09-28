@@ -67,11 +67,15 @@ defmodule Scrapex.GenSpiderTest do
   defmodule Spider do
     use GenSpider
 
-    def parse(response, state) do
+    def parse(_response, state) do
       # Assert that this function is called.
       assert state
       {:ok, state}
     end
     
+  end
+
+  test "should get the HTML of the start URL(s)" do
+    GenSpider.start(Spider, [], [urls: ["http://www.example.com"]])
   end
 end

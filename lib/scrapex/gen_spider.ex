@@ -212,11 +212,10 @@ defmodule Scrapex.GenSpider do
       def parse(response, state) do
         # We do this to trick dialyzer to not complain about non-local returns.
         reason = {:bad_call, response}
-        # case :erlang.phash2(1, 1) do
-        #   0 -> exit(reason)
-        #   1 -> {:stop, reason, state}
-        # end
-        {:stop, reason, state}
+        case :erlang.phash2(1, 1) do
+          0 -> exit(:normal)
+          1 -> {:stop, reason, state}
+        end
       end
 
       @doc false
@@ -224,7 +223,7 @@ defmodule Scrapex.GenSpider do
         # We do this to trick dialyzer to not complain about non-local returns.
         reason = :bad_call
         case :erlang.phash2(1, 1) do
-          0 -> exit(reason)
+          0 -> exit(:normal)
           1 -> {:stop, reason, state}
         end
       end
