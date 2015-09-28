@@ -1,16 +1,15 @@
 defmodule Scrapex.GenSpiderTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case
   alias Scrapex.GenSpider
+
+  @example_com "http://localhost:9090/example.com.html"
+  @opts [urls: [@example_com]]
 
   test "a spider is a process" do
     defmodule GoodSpider do
       # GenSpider callbacks
       def init(args) do
         {:ok, args}
-      end
-
-      def parse(_, state) do
-        {:ok, state}
       end
     end
 
@@ -22,7 +21,6 @@ defmodule Scrapex.GenSpiderTest do
   end
 
   test "spider is based on GenServer" do
-    stop_reason = :stop
     defmodule EmoSpider do
       # GenSpider callbacks
       def init(_args) do
@@ -61,7 +59,7 @@ defmodule Scrapex.GenSpiderTest do
       
     end
 
-    GenSpider.start(TestSpider, [])
+    GenSpider.start(TestSpider, [], @opts)
   end
 
   defmodule Spider do
@@ -76,6 +74,16 @@ defmodule Scrapex.GenSpiderTest do
   end
 
   test "should get the HTML of the start URL(s)" do
-    GenSpider.start(Spider, [], [urls: ["http://www.example.com"]])
+    defmodule HTMLSpider do
+      use GenSpider
+
+      def parse(actual, state) do
+        expected = HTTPoison.get!("http://localhost:9090/example.com.html").body
+        assert actual === expected
+        {:ok, state}
+      end
+      
+    end
+    GenSpider.start(HTMLSpider, [], @opts)
   end
 end

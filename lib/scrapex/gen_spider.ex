@@ -323,7 +323,21 @@ defmodule Scrapex.GenSpider do
   def export(spider, format) do
     GenServer.call(spider, {:export, format})
   end
-  
+
+  @doc """
+  Asynchronously request the HTML of a URL.
+  """
+  def request(url) do
+    case HTTPoison.get(url) do
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
+        body
+      {:ok, %HTTPoison.Response{status_code: 404}} ->
+        {:error, :not_found}
+      {:error, %HTTPoison.Error{reason: reason}} ->
+        {:error, reason}
+    end
+  end
+
   # GenServer callbacks
 
   def init({module, args, opts}) do
@@ -352,16 +366,37 @@ defmodule Scrapex.GenSpider do
   This is a `GenServer` callback called whenever any of the `init`,
   `call`, or `cast` function is called with a timeout value.
 
-  The `GenSpider` uses the timeout value to trigger a crawl.
+  The `GenSpider` uses the timeout value to trigger a crawl, in which
+  it spawns a task for each URLs specified in the `opts`.
+
+  The results will be handled in a different function.
   """
   def handle_info(:timeout, {module, state, opts}) do
-    case apply(module, :parse, ["Hello", state]) do
+    urls = opts[:urls] || []
+    urls
+    |> Enum.each(fn(url) ->
+      Task.async(fn() -> request(url) end)
+    end)
+    {:noreply, {module, state, opts}}
+  end
+
+  @doc """
+  Called when a request is completed.
+
+  When a request is completed, i.e. receives the response, this process
+  receives a message with the result. We then call the `parse` function
+  of the callback module.
+  """
+  def handle_info({_ref, result}, {module, state, opts}) do
+    case apply(module, :parse, [result, state]) do
       {:stop, _reason, state} ->
         {:stop, :normal, {module, state, opts}}
       {:ok, state} ->
         {:noreply, {module, state, opts}}
     end
   end
-  
 
+  def handle_info(_, state) do
+    {:noreply, state}
+  end
 end
