@@ -167,7 +167,7 @@ defmodule Scrapex.GenSpider do
   @type response :: binary
 
   @typedoc "Exportable formats"
-  @type format :: :json | :csv | :xml
+  @type format :: :html | :json | :csv | :xml
 
   # `GenSpider` is based on `GenServer`.
   use GenServer
@@ -242,6 +242,8 @@ defmodule Scrapex.GenSpider do
                       terminate: 2, code_change: 3]
     end
   end
+
+  defstruct module: nil, state: nil, options: nil, data: [] 
 
   @doc """
   Starts a `GenSpider` process linked to the current process.
@@ -320,7 +322,7 @@ defmodule Scrapex.GenSpider do
   Exports the stored data with specific format
   """
   @spec export(spider, format) :: any
-  def export(spider, format) do
+  def export(spider, format \\ :html) do
     GenServer.call(spider, {:export, format})
   end
 
@@ -341,16 +343,18 @@ defmodule Scrapex.GenSpider do
   # GenServer callbacks
 
   def init({module, args, opts}) do
+    spider = %GenSpider{ module: module, options: opts}
+
     case apply(module, :init, [args]) do
-      {:ok, mod_state} ->
+      {:ok, state} ->
         # Return 0 timeout to trigger crawl immediately.
         # This works regardless of interval option, since we always
         # have a crawl. A crawl will use interval option to see if it
         # needs to do the next one.
-        {:ok, {module, mod_state, opts}, 0}
-      {:ok, mod_state, delay} ->
+        {:ok, %{spider | state: state}, 0}
+      {:ok, state, delay} ->
         # Delay the crawl by the value specified in return.
-        {:ok, {module, mod_state, opts}, delay}
+        {:ok, %{spider | state: state}, delay}
       :ignore ->
         :ignore
       {:stop, reason} ->
@@ -358,6 +362,19 @@ defmodule Scrapex.GenSpider do
       other ->
         other
     end
+  end
+
+  @doc """
+  Called to export the data in a specific format.
+  """
+  def handle_call({:export, _format}, _from, spider) do
+    # case apply(spider.module, :handle_export, [format,spider.state]) do
+    #   {:stop, _reason, new_state} ->
+    #     {:stop, :normal, %{spider | state: new_state}}
+    #   {:ok, data, new_state} ->
+    #     {:reply, data, %{spider | state: new_state}}
+    # end
+    {:reply, spider.data, spider}
   end
 
   @doc """
@@ -371,13 +388,13 @@ defmodule Scrapex.GenSpider do
 
   The results will be handled in a different function.
   """
-  def handle_info(:timeout, {module, state, opts}) do
-    urls = opts[:urls] || []
+  def handle_info(:timeout, spider) do
+    urls = spider.options[:urls] || []
     urls
     |> Enum.each(fn(url) ->
       Task.async(fn() -> request(url) end)
     end)
-    {:noreply, {module, state, opts}}
+    {:noreply, spider}
   end
 
   @doc """
@@ -387,12 +404,13 @@ defmodule Scrapex.GenSpider do
   receives a message with the result. We then call the `parse` function
   of the callback module.
   """
-  def handle_info({_ref, result}, {module, state, opts}) do
-    case apply(module, :parse, [result, state]) do
-      {:stop, _reason, state} ->
-        {:stop, :normal, {module, state, opts}}
-      {:ok, state} ->
-        {:noreply, {module, state, opts}}
+  def handle_info({_ref, result}, spider) do
+    case apply(spider.module, :parse, [result, spider.state]) do
+      {:stop, _reason, new_state} ->
+        {:stop, :normal, %{spider | state: new_state}}
+      {:ok, data, new_state} ->
+        new_data = spider.data ++ [data]
+        {:noreply, %{spider | state: new_state, data: new_data}}
     end
   end
 

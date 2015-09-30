@@ -1,7 +1,7 @@
 defmodule Scrapex.Mixfile do
   use Mix.Project
 
-  @version "0.0.1"
+  @version "0.0.2"
 
   def project do
     [app: :scrapex,
@@ -13,7 +13,7 @@ defmodule Scrapex.Mixfile do
      """,
      source_url: "https://bitbucket.org/inhuman/scrapex",
      homepage_url: "https://bitbucket.org/inhuman/scrapex/overview",
-     elixir: "~> 1.0",
+     elixir: "~> 1.1.1",
      escript: [main_module: Scrapex],
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,

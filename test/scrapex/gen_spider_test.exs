@@ -51,39 +51,64 @@ defmodule Scrapex.GenSpiderTest do
     defmodule TestSpider do
       use GenSpider
 
-      def parse(_, state) do
-        # Assert that this function is called.
-        assert state
-        {:ok, state}
+      def init(tester) do
+        {:ok, tester}
+      end
+
+      def parse(response, tester) do
+        send tester, {:test_result, response}
+        {:ok, response, tester}
       end
       
     end
 
-    GenSpider.start(TestSpider, [], @opts)
-  end
+    GenSpider.start(TestSpider, self, @opts)
 
-  defmodule Spider do
-    use GenSpider
-
-    def parse(_response, state) do
-      # Assert that this function is called.
-      assert state
-      {:ok, state}
-    end
-    
+    assert_receive({:test_result, _}, 500)
   end
 
   test "should get the HTML of the start URL(s)" do
     defmodule HTMLSpider do
       use GenSpider
 
-      def parse(actual, state) do
-        expected = HTTPoison.get!("http://localhost:9090/example.com.html").body
-        assert actual === expected
-        {:ok, state}
+      def init(tester) do
+        {:ok, tester}
+      end
+
+      def parse(response, tester) do
+        send tester, {:test_result, response}
+        {:ok, response, tester}
       end
       
     end
-    GenSpider.start(HTMLSpider, [], @opts)
+    GenSpider.start(HTMLSpider, self, @opts)
+
+    assert_receive({:test_result, actual}, 500)
+    expected = HTTPoison.get!("http://localhost:9090/example.com.html").body
+    assert actual === expected
+  end
+
+  test "can export data" do
+    defmodule FastSpider do
+      use GenSpider
+
+      def init(tester) do
+        {:ok, tester}
+      end
+
+      def parse(response, tester) do
+        send tester, {:test_result, response}
+        {:ok, response, tester}
+      end
+      
+    end
+    {:ok, spider} = GenSpider.start(FastSpider, self, @opts)
+
+    assert_receive({:test_result, _}, 500)
+    # Assume that the spider, which requested to the same URL, should
+    # have finished before our request below.
+    expected = HTTPoison.get!("http://localhost:9090/example.com.html").body
+    assert [expected] == GenSpider.export(spider)
+
   end
 end

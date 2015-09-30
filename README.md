@@ -26,7 +26,7 @@ Written in Elixir and runs on Linux, Windows, Mac, BSD, and embedded devices.
         |> css("ul li a::attr(\"href\")")
         |> re(~r/.*/\d\d\d\d/\d\d/$/)
         |> Enum.map(fn(url) ->
-          Scrapex.Request(urljoin(url), &parse_titles/1)
+          await request(urljoin(url), &parse_titles/1)
         end)
       end
 
@@ -45,3 +45,13 @@ Written in Elixir and runs on Linux, Windows, Mac, BSD, and embedded devices.
     # This is the client
     GenSpider.export(pid, :json)
     #=> "[{} | _]"
+
+## TODOS
+
+- [x] `GenSpider behaviour`.
+- [x] Request URL and pass response to `parse` callback.
+- [ ] One time spider
+- [ ] CSS selector
+- [ ] XPath selector
+- [ ] Parse response chunk by chunk
+- [ ] CLI
