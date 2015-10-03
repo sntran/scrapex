@@ -113,9 +113,9 @@ defmodule Scrapex.GenSpider do
 
         # Client
         def start_link(sitemap) do
-          opts =  name: :webscrapper,
+          opts =  [name: :webscrapper,
               urls: [sitemap["siteUrl"]], 
-              interval: 3600
+              interval: 3600]
           GenSpider.start_link(__MODULE__, sitemap, opts)
         end
 
@@ -130,11 +130,11 @@ defmodule Scrapex.GenSpider do
         end
         
         def parse(response, %{"selectors" => selectors}) do
-           # Wrap the HTML with a Css selector engine.
+          # Wrap the HTML with a Css selector engine.
           engine = GenSpider.CssSelector(response)
           Enum.map(selectors, fn(selector) ->
             selector
-            |>  engine.select()
+            |> engine.select()
             |> engine.extract()
           end)
         end

@@ -43,6 +43,7 @@ defmodule Scrapex.Mixfile do
   defp deps do
     [
       {:httpoison, "~> 0.7"},
+      {:floki, "~> 0.5"},
 
       # Docs dependencies
       {:earmark, "~> 0.1", only: :dev},
