@@ -4,8 +4,8 @@ defmodule Scrapex.SelectorTest do
 
   test "parse CSS selector" do
     href = HTTPoison.get!("http://localhost:9090/example.com.html").body
-    |> Selector.css("a[href^=http]")
-    |> Selector.attribute("href")
+    |> Selector.select("a[href^=http]")
+    |> Selector.extract("href")
 
     assert href === ["http://www.iana.org/domains/example"]
   end
