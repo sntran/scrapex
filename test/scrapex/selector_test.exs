@@ -1,20 +1,36 @@
 defmodule Scrapex.SelectorTest do
-  use ExUnit.Case
-  alias Scrapex.Selector
+  use ExUnit.Case, async: true
+  import Scrapex.Selector
 
-  test "parse CSS selector" do
-    href = HTTPoison.get!("http://localhost:9090/example.com.html").body
-    |> Selector.select("a[href^=http]")
-    |> Selector.extract("href")
+  setup_all do
+    url = "http://localhost:9090/example.com.html"
+    html = HTTPoison.get!(url).body
 
-    assert href === ["http://www.iana.org/domains/example"]
+    # No metadata
+    {:ok, url: url, body: html}
   end
 
-  test "get text content" do
-    href = HTTPoison.get!("http://localhost:9090/example.com.html").body
-    |> Selector.select("h1")
-    |> Selector.extract("text")
+  test "parse CSS selector", context do
+    [href] = context.body
+    |> select("a[href^=http]")
+    |> extract("href")
 
-    assert href === ["Example Domain"]
+    assert href === "http://www.iana.org/domains/example"
+  end
+
+  test "select text content", context do
+    [h1] = context.body
+    |> select("h1")
+    |> extract("text")
+
+    assert h1 === "Example Domain"
+  end
+
+  test "default to get content", context do
+    [h1] = context.body
+    |> select("h1")
+    |> extract()
+
+    assert h1 === "Example Domain"
   end
 end
