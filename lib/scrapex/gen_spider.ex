@@ -1,5 +1,6 @@
 defmodule Scrapex.GenSpider do
   alias Scrapex.GenSpider
+  require Logger
   @moduledoc """
   A behaviour module for implementing a web data extractor.
 
@@ -322,8 +323,8 @@ defmodule Scrapex.GenSpider do
   Exports the stored data with specific format
   """
   @spec export(spider, format) :: any
-  def export(spider, format \\ :html) do
-    GenServer.call(spider, {:export, format})
+  def export(spider, format \\ :html, override \\ false) do
+    GenServer.call(spider, {:export, format, override})
   end
 
   @doc """
@@ -332,7 +333,7 @@ defmodule Scrapex.GenSpider do
   def request(url) do
     case HTTPoison.get(url) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
-        body
+        {:ok, body, url}
       {:ok, %HTTPoison.Response{status_code: 404}} ->
         {:error, :not_found}
       {:error, %HTTPoison.Error{reason: reason}} ->
@@ -344,6 +345,7 @@ defmodule Scrapex.GenSpider do
 
   def init({module, args, opts}) do
     spider = %GenSpider{ module: module, options: opts}
+    urls = opts[:urls] || []
 
     case apply(module, :init, [args]) do
       {:ok, state} ->
@@ -351,9 +353,13 @@ defmodule Scrapex.GenSpider do
         # This works regardless of interval option, since we always
         # have a crawl. A crawl will use interval option to see if it
         # needs to do the next one.
+        # send_after(self, 0, :crawl)
+        Logger.debug "Starts a spider immediately"
         {:ok, %{spider | state: state}, 0}
       {:ok, state, delay} ->
         # Delay the crawl by the value specified in return.
+        # send_after(self, delay, :crawl)
+        Logger.debug "Starts a spider after #{delay} milliseconds"
         {:ok, %{spider | state: state}, delay}
       :ignore ->
         :ignore
@@ -367,7 +373,7 @@ defmodule Scrapex.GenSpider do
   @doc """
   Called to export the data in a specific format.
   """
-  def handle_call({:export, _format}, _from, spider) do
+  def handle_call({:export, _format, false}, _from, spider) do
     # case apply(spider.module, :handle_export, [format,spider.state]) do
     #   {:stop, _reason, new_state} ->
     #     {:stop, :normal, %{spider | state: new_state}}
@@ -376,12 +382,13 @@ defmodule Scrapex.GenSpider do
     # end
     {:reply, spider.data, spider}
   end
+  def handle_call({:export, _format, true}, _from, spider) do
+    {:reply, spider.data, spider}
+  end
+  
 
   @doc """
   Called when a timeout occurs, usually when to start a crawl.
-
-  This is a `GenServer` callback called whenever any of the `init`,
-  `call`, or `cast` function is called with a timeout value.
 
   The `GenSpider` uses the timeout value to trigger a crawl, in which
   it spawns a task for each URLs specified in the `opts`.
@@ -389,10 +396,28 @@ defmodule Scrapex.GenSpider do
   The results will be handled in a different function.
   """
   def handle_info(:timeout, spider) do
-    urls = spider.options[:urls] || []
-    urls
-    |> Enum.each(fn(url) ->
-      Task.async(fn() -> request(url) end)
+    options = spider.options
+    interval = options[:interval]
+    urls = options[:urls] || []
+
+    Logger.debug "Spider starts crawling #{IO.inspect urls}"
+
+    urls |> Enum.each(fn(url) ->
+      handle_info({:crawl, url}, spider)
+    end)
+    {:noreply, spider}
+  end
+
+  @doc """
+  Called from a timer to crawl a URL.
+
+  This generates an async task to request to a URL. The response will
+  be sent back in another message through `Task` mechanism.
+  """
+  def handle_info({:crawl, url}, spider) do
+    Logger.debug "Crawling #{url}"
+    Task.async(fn() -> 
+      request(url)
     end)
     {:noreply, spider}
   end
@@ -404,17 +429,29 @@ defmodule Scrapex.GenSpider do
   receives a message with the result. We then call the `parse` function
   of the callback module.
   """
-  def handle_info({_ref, result}, spider) do
+  def handle_info({_ref, {:ok, result, url}}, spider) do
+    Logger.debug "Got data from #{url}"
     case apply(spider.module, :parse, [result, spider.state]) do
-      {:stop, _reason, new_state} ->
+      {:stop, reason, new_state} ->
+        Logger.debug "Spider is stopped with reason #{IO.inspect reason}"
         {:stop, :normal, %{spider | state: new_state}}
       {:ok, data, new_state} ->
         new_data = spider.data ++ [data]
+        interval = spider.options[:interval]
+        # Start a new crawl.
+        send_after(self, interval, {:crawl, url})
         {:noreply, %{spider | state: new_state, data: new_data}}
     end
   end
 
-  def handle_info(_, state) do
+  def handle_info(_info, state) do
     {:noreply, state}
+  end
+
+  defp send_after(_dest, nil, _message) do
+    :erlang.make_ref()
+  end
+  defp send_after(dest, time, message) do
+    :erlang.send_after(time, dest, message)
   end
 end

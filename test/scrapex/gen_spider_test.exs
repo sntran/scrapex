@@ -111,4 +111,26 @@ defmodule Scrapex.GenSpiderTest do
     assert [expected] == GenSpider.export(spider)
 
   end
+
+  test "can run on schedule" do
+    defmodule ScheduleSpider do
+      use GenSpider
+
+      def init(tester) do
+        {:ok, tester}
+      end
+
+      def parse(response, tester) do
+        send tester, {:test_result, response}
+        {:ok, response, tester}
+      end
+      
+    end
+    opts = [urls: @opts[:urls], interval: 500]
+    GenSpider.start(ScheduleSpider, self, opts)
+
+    assert_receive({:test_result, _}, 300)
+    :timer.sleep(100)
+    assert_receive({:test_result, _}, 500)
+  end
 end
