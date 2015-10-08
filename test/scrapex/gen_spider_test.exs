@@ -3,6 +3,7 @@ defmodule Scrapex.GenSpiderTest do
   alias Scrapex.GenSpider
 
   @example_com "http://localhost:9090/example.com.html"
+  @ecommerce_site "http://localhost:9090/e-commerce/static/index.html"
   @opts [urls: [@example_com]]
 
   test "a spider is a process" do
@@ -98,7 +99,7 @@ defmodule Scrapex.GenSpiderTest do
 
       def parse(response, tester) do
         send tester, {:test_result, response}
-        {:ok, response, tester}
+        {:ok, [response], tester}
       end
       
     end
@@ -112,25 +113,64 @@ defmodule Scrapex.GenSpiderTest do
 
   end
 
-  test "can run on schedule" do
-    defmodule ScheduleSpider do
-      use GenSpider
+  defmodule Spider do
+    use GenSpider
 
-      def init(tester) do
-        {:ok, tester}
-      end
-
-      def parse(response, tester) do
-        send tester, {:test_result, response}
-        {:ok, response, tester}
-      end
-      
+    def init(tester) do
+      {:ok, tester}
     end
+
+    def parse(response, tester) do
+      send tester, {:test_result, response}
+      uuid = :crypto.strong_rand_bytes(8) |> Base.encode16
+      {:ok, [uuid <> response], tester}
+    end
+    
+  end
+
+  test "can run on schedule" do
     opts = [urls: @opts[:urls], interval: 500]
-    GenSpider.start(ScheduleSpider, self, opts)
+    GenSpider.start(Spider, self, opts)
 
     assert_receive({:test_result, _}, 300)
-    :timer.sleep(100)
+    # Give time for spider to crawl
+    :timer.sleep(50)
     assert_receive({:test_result, _}, 500)
+  end
+
+  test "new data will replace old data" do
+    opts = [urls: @opts[:urls], interval: 500]
+    {:ok, spider} = GenSpider.start(Spider, self, opts)
+
+    assert_receive({:test_result, _old}, 300)
+    [old] = GenSpider.export(spider)
+    <<old_uuid :: 128, _rest :: binary>> = old
+    # Give time for spider to crawl
+    :timer.sleep(50)
+    assert_receive({:test_result, new}, 500)
+    [new] = GenSpider.export(spider)
+    <<new_uuid :: 128, _rest :: binary>> = new
+    assert new_uuid != old_uuid
+  end
+
+  test "multiple URLs should replace old data with merged new data" do
+    opts = [urls: [ @ecommerce_site | @opts[:urls] ], interval: 500]
+    {:ok, spider} = GenSpider.start(Spider, self, opts)
+
+    assert_receive({:test_result, _old}, 1500)
+    assert_receive({:test_result, _old}, 1500)
+
+    old = GenSpider.export(spider)
+
+    assert_receive({:test_result, _new}, 1500)
+    assert_receive({:test_result, _new}, 1500)
+
+    GenSpider.export(spider)
+    |> Enum.with_index
+    |> Enum.each(fn({data, index}) ->
+      <<old_uuid :: 128, _rest :: binary>> = Enum.at(old, index)
+      <<new_uuid :: 128, _rest :: binary>> = data
+      assert new_uuid = old_uuid
+    end)
   end
 end

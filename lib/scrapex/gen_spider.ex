@@ -346,6 +346,8 @@ defmodule Scrapex.GenSpider do
   def init({module, args, opts}) do
     spider = %GenSpider{ module: module, options: opts}
     urls = opts[:urls] || []
+    # Set an empty data set with each URLs as keys.
+    data = Enum.map(urls, &({&1, nil}))
 
     case apply(module, :init, [args]) do
       {:ok, state} ->
@@ -355,12 +357,12 @@ defmodule Scrapex.GenSpider do
         # needs to do the next one.
         # send_after(self, 0, :crawl)
         Logger.debug "Starts a spider immediately"
-        {:ok, %{spider | state: state}, 0}
+        {:ok, %{spider | state: state, data: data}, 0}
       {:ok, state, delay} ->
         # Delay the crawl by the value specified in return.
         # send_after(self, delay, :crawl)
         Logger.debug "Starts a spider after #{delay} milliseconds"
-        {:ok, %{spider | state: state}, delay}
+        {:ok, %{spider | state: state, data: data}, delay}
       :ignore ->
         :ignore
       {:stop, reason} ->
@@ -380,7 +382,11 @@ defmodule Scrapex.GenSpider do
     #   {:ok, data, new_state} ->
     #     {:reply, data, %{spider | state: new_state}}
     # end
-    {:reply, spider.data, spider}
+    data = 
+      spider.data
+      |> Enum.map(fn({_, data}) -> data end)
+      |> Enum.concat
+    {:reply, data, spider}
   end
   def handle_call({:export, _format, true}, _from, spider) do
     {:reply, spider.data, spider}
@@ -436,7 +442,7 @@ defmodule Scrapex.GenSpider do
         Logger.debug "Spider is stopped with reason #{IO.inspect reason}"
         {:stop, :normal, %{spider | state: new_state}}
       {:ok, data, new_state} ->
-        new_data = spider.data ++ [data]
+        new_data = List.keystore(spider.data, url, 0, {url, data})
         interval = spider.options[:interval]
         # Start a new crawl.
         send_after(self, interval, {:crawl, url})
