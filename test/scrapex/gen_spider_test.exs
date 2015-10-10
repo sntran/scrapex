@@ -147,10 +147,10 @@ defmodule Scrapex.GenSpiderTest do
     <<old_uuid :: 128, _rest :: binary>> = old
     # Give time for spider to crawl
     :timer.sleep(50)
-    assert_receive({:test_result, new}, 500)
+    assert_receive({:test_result, _new}, 500)
     [new] = GenSpider.export(spider)
     <<new_uuid :: 128, _rest :: binary>> = new
-    assert new_uuid != old_uuid
+    assert new_uuid !== old_uuid
   end
 
   test "multiple URLs should replace old data with merged new data" do
@@ -170,7 +170,38 @@ defmodule Scrapex.GenSpiderTest do
     |> Enum.each(fn({data, index}) ->
       <<old_uuid :: 128, _rest :: binary>> = Enum.at(old, index)
       <<new_uuid :: 128, _rest :: binary>> = data
-      assert new_uuid = old_uuid
+      assert new_uuid !== old_uuid
     end)
+  end
+
+  defmodule MapSpider do
+    use GenSpider
+
+    def init(tester) do
+      {:ok, tester}
+    end
+
+    def parse(response, tester) do
+      result = [%{"body" => response}]
+      send tester, {:test_result, result}
+      {:ok, result, tester}
+    end
+    
+  end
+
+  test "returned map can be exported to json" do
+    {:ok, spider} = GenSpider.start(MapSpider, self, @opts)
+    assert_receive({:test_result, result}, 300)
+    json = GenSpider.export(spider, :json)
+    assert is_binary(json)
+    assert json == Poison.encode!(result)
+  end
+
+  test "can export using an encoder" do
+    {:ok, spider} = GenSpider.start(MapSpider, self, @opts)
+    assert_receive({:test_result, result}, 300)
+    json = GenSpider.export(spider, &Poison.encode!/1)
+    assert is_binary(json)
+    assert json == Poison.encode!(result)
   end
 end

@@ -44,6 +44,7 @@ defmodule Scrapex.Mixfile do
     [
       {:httpoison, "~> 0.7"},
       {:floki, "~> 0.5"},
+      {:poison, "~> 1.4.0"},
 
       # Docs dependencies
       {:earmark, "~> 0.1", only: :dev},

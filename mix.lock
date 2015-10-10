@@ -5,4 +5,5 @@
   "httpoison": {:hex, :httpoison, "0.7.4"},
   "idna": {:hex, :idna, "1.0.2"},
   "mochiweb": {:hex, :mochiweb, "2.12.2"},
+  "poison": {:hex, :poison, "1.4.0"},
   "ssl_verify_hostname": {:hex, :ssl_verify_hostname, "1.0.5"}}

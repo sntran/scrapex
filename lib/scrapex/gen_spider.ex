@@ -323,7 +323,7 @@ defmodule Scrapex.GenSpider do
   Exports the stored data with specific format
   """
   @spec export(spider, format) :: any
-  def export(spider, format \\ :html, override \\ false) do
+  def export(spider, format \\ nil, override \\ false) do
     GenServer.call(spider, {:export, format, override})
   end
 
@@ -375,7 +375,7 @@ defmodule Scrapex.GenSpider do
   @doc """
   Called to export the data in a specific format.
   """
-  def handle_call({:export, _format, false}, _from, spider) do
+  def handle_call({:export, nil, false}, _from, spider) do
     # case apply(spider.module, :handle_export, [format,spider.state]) do
     #   {:stop, _reason, new_state} ->
     #     {:stop, :normal, %{spider | state: new_state}}
@@ -388,6 +388,19 @@ defmodule Scrapex.GenSpider do
       |> Enum.concat
     {:reply, data, spider}
   end
+  
+  def handle_call({:export, :json, override?}, from, spider) do
+    {_, data, _} = handle_call({:export, nil, override?}, from, spider)
+    {:reply, Poison.encode!(data), spider}
+  end
+
+  def handle_call({:export, encoder, override?}, from, spider) 
+  when is_function(encoder, 1) 
+  do
+    {_, data, _} = handle_call({:export, nil, override?}, from, spider)
+    {:reply, encoder.(data), spider}
+  end
+
   def handle_call({:export, _format, true}, _from, spider) do
     {:reply, spider.data, spider}
   end
