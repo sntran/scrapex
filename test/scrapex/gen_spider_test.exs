@@ -183,14 +183,20 @@ defmodule Scrapex.GenSpiderTest do
 
     def parse(response, tester) do
       result = [%{"body" => response}]
-      send tester, {:test_result, result}
-      {:ok, result, tester}
+      case tester.(result) do
+        {:stop, reason} ->
+          {:stop, reason, tester}
+        _ -> 
+        {:ok, result, tester}
+      end
     end
     
   end
 
   test "returned map can be exported to json" do
-    {:ok, spider} = GenSpider.start(MapSpider, self, @opts)
+    tester = self
+    callback = fn(result) -> send tester, {:test_result, result} end
+    {:ok, spider} = GenSpider.start(MapSpider, callback, @opts)
     assert_receive({:test_result, result}, 300)
     json = GenSpider.export(spider, :json)
     assert is_binary(json)
@@ -198,7 +204,9 @@ defmodule Scrapex.GenSpiderTest do
   end
 
   test "can export using an encoder" do
-    {:ok, spider} = GenSpider.start(MapSpider, self, @opts)
+    tester = self
+    callback = fn(result) -> send tester, {:test_result, result} end
+    {:ok, spider} = GenSpider.start(MapSpider, callback, @opts)
     assert_receive({:test_result, result}, 300)
     json = GenSpider.export(spider, &Poison.encode!/1)
     assert is_binary(json)
@@ -206,11 +214,57 @@ defmodule Scrapex.GenSpiderTest do
   end
 
   test "will await for data to export" do
+    tester = self
+    callback = fn(result) -> send tester, {:test_result, result} end
     opts = [urls: [ @ecommerce_site | @opts[:urls] ]]
-    {:ok, spider} = GenSpider.start(MapSpider, self, opts)
+    {:ok, spider} = GenSpider.start(MapSpider, callback, opts)
     # Since we can export immediately after starting the spider, it
     # will need to await for data.
     data = GenSpider.export(spider)
-    assert ([%{"body" => _body1}, %{"body" => _body2}] = data)
+
+    actual =
+    opts[:urls]
+    |> Enum.map(&(%{"body" => HTTPoison.get!(&1).body}))
+    assert actual === data
+  end
+
+  test "will export partial or no data if spider returns stop" do
+    tester = self
+    first_response = HTTPoison.get!(@ecommerce_site).body
+    callback = fn(result = [%{"body" => response}]) ->
+      case response do
+        ^first_response ->
+          send tester, {:test_result, result}
+        _ ->
+          {:stop, :test}
+      end
+    end
+
+    opts = [urls: [ @ecommerce_site | @opts[:urls] ]]
+    {:ok, spider} = GenSpider.start(MapSpider, callback, opts)
+
+    data = GenSpider.export(spider)
+    assert [%{"body" => first_response}] === data
+  end
+
+  test "stop the spider when the callback returns stop" do
+    tester = self
+    first_response = HTTPoison.get!(@ecommerce_site).body
+    callback = fn(result = [%{"body" => response}]) ->
+      case response do
+        ^first_response ->
+          send tester, {:test_result, result}
+        _ ->
+          {:stop, :test}
+      end
+    end
+
+    opts = [urls: [ @ecommerce_site | @opts[:urls] ]]
+    {:ok, spider} = GenSpider.start(MapSpider, callback, opts)
+
+    data = GenSpider.export(spider)
+    # Let the spider stop
+    :timer.sleep(100)
+    refute Process.alive?(spider)
   end
 end

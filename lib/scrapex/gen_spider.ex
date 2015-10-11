@@ -244,7 +244,7 @@ defmodule Scrapex.GenSpider do
     end
   end
 
-  defstruct module: nil, state: nil, options: nil, data: [], requests: []
+  defstruct module: nil, state: nil, options: [], data: [], requests: []
 
   @doc """
   Starts a `GenSpider` process linked to the current process.
@@ -323,6 +323,19 @@ defmodule Scrapex.GenSpider do
   Exports the stored data with specific format.
 
   This call will block until all data received.
+
+  This is called in the following situations:
+
+  - Right after spider is started.
+  - In the middle of a crawl.
+  - In between the crawl interval.
+
+  For the first two situations, the spider will manually awaits the
+  requests instead of handle the response message in `handle_info/2`.
+
+  If one of the `parse/2` callbacks wants to stop the spider, this
+  function will still return partial data if any, and then stops the
+  spider.
   """
   @spec export(spider, format) :: any
   def export(spider, format \\ nil, override \\ false) do
@@ -377,11 +390,15 @@ defmodule Scrapex.GenSpider do
   def handle_call(:await, _from, spider) do
     spider = 
       spider.requests
-      |> Enum.reduce(spider, fn(request, spider) ->
+      |> Enum.reduce_while(spider, fn(request, spider) ->
         ref = request.ref
         response = Task.await(request)
-        {:noreply, spider} = handle_info({ref, response}, spider)
-        spider
+        case handle_info({ref, response}, spider) do
+          {:noreply, spider} ->
+            {:cont, spider}
+          {:stop, _reason, spider} ->
+            {:halt, spider}
+        end
       end)
     Logger.debug("Awaited for data")
     {:reply, :ok, spider}
@@ -395,9 +412,17 @@ defmodule Scrapex.GenSpider do
     
     data = 
       spider.data
-      |> Enum.map(fn({_, data}) -> data end)
-      |> Enum.concat
-    {:reply, data, spider}
+      |> Enum.filter_map(fn({_,data}) -> data !== nil end, 
+                        fn({_, data}) -> data end)
+
+    is_partial? = length(data) !== length(spider.data)
+    data = Enum.concat(data)
+    case is_partial? do
+      :false ->
+        {:reply, data, spider}
+      :true ->
+        {:stop, :normal, data, spider}
+    end
   end
 
   def handle_call({:export, :json, override?}, from, spider) do
@@ -427,7 +452,6 @@ defmodule Scrapex.GenSpider do
   """
   def handle_info(:timeout, spider) do
     options = spider.options
-    interval = options[:interval]
     urls = options[:urls] || []
 
     Logger.debug "Spider starts crawling #{IO.inspect urls}"
@@ -459,7 +483,7 @@ defmodule Scrapex.GenSpider do
 
   If this is for the last request, it sets a new timer if needed.
   """
-  def handle_info({ref, msg = {:ok, result, url}}, spider) do
+  def handle_info({ref, {:ok, result, url}}, spider) do
     Logger.debug "Got data from #{url}"
 
     requests = spider.requests
@@ -469,7 +493,7 @@ defmodule Scrapex.GenSpider do
 
     case apply(spider.module, :parse, [result, spider.state]) do
       {:stop, reason, new_state} ->
-        Logger.debug "Spider is stopped with reason #{IO.inspect reason}"
+        Logger.debug "Spider is stopped with reason #{reason}"
         {:stop, :normal, %{spider | state: new_state}}
       {:ok, data, new_state} ->
 
@@ -488,9 +512,6 @@ defmodule Scrapex.GenSpider do
     {:noreply, state}
   end
 
-  @doc """
-  Asynchronously request the HTML of a URL.
-  """
   defp request(url) do
     case HTTPoison.get(url) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
