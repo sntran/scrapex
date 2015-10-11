@@ -244,7 +244,8 @@ defmodule Scrapex.GenSpider do
     end
   end
 
-  defstruct module: nil, state: nil, options: [], data: [], requests: []
+  defstruct module: nil, state: nil, 
+            options: [], data: [], requests: [], timer: nil
 
   @doc """
   Starts a `GenSpider` process linked to the current process.
@@ -290,7 +291,9 @@ defmodule Scrapex.GenSpider do
   `{:error, reason}` or `:ignore`, respectively.
   """
   @spec start_link(module, any, options) :: GenServer.on_start
-  def start_link(module, args, options \\ []) when is_atom(module) and is_list(options) do
+  def start_link(module, args, options \\ []) 
+  when is_atom(module) and is_list(options) 
+  do
     do_start(:start_link, module, args, options)
   end
 
@@ -299,7 +302,9 @@ defmodule Scrapex.GenSpider do
   See `start_link/3` for more information.
   """
   @spec start(module, any, options) :: GenServer.on_start
-  def start(module, args, options \\ []) when is_atom(module) and is_list(options) do
+  def start(module, args, options \\ []) 
+  when is_atom(module) and is_list(options)
+  do
     do_start(:start, module, args, options)
   end
 
@@ -336,8 +341,11 @@ defmodule Scrapex.GenSpider do
   If one of the `parse/2` callbacks wants to stop the spider, this
   function will still return partial data if any, and then stops the
   spider.
+
+  If the third argument is true, the spider will clear any timer in
+  place and immediately crawl for new data.
   """
-  @spec export(spider, format) :: any
+  @spec export(spider, format, boolean) :: any
   def export(spider, format \\ nil, override \\ false) do
     # Await for all the data to be collected first.
     GenServer.call(spider, :await)
@@ -347,7 +355,8 @@ defmodule Scrapex.GenSpider do
   # GenServer callbacks
 
   def init({module, args, opts}) do
-    spider = %GenSpider{ module: module, options: opts}
+    spider = %GenSpider{  module: module, options: opts, 
+                          timer: :erlang.make_ref()}
     urls = opts[:urls] || []
     # Set an empty data set with each URLs as keys.
     data = Enum.map(urls, &({&1, nil}))
@@ -407,6 +416,13 @@ defmodule Scrapex.GenSpider do
   @doc """
   Called to export the data in a specific format.
   """
+  def handle_call({:export, nil, true}, from, spider) do
+    :erlang.cancel_timer(spider.timer)
+    {:noreply, spider} = handle_info(:crawl, spider)
+    {:reply, :ok, spider} = handle_call(:await, from, spider)
+    handle_call({:export, nil, false}, from, spider)
+  end
+
   def handle_call({:export, nil, false}, _from, spider) do
     Logger.debug("Exporting data")
     
@@ -418,9 +434,9 @@ defmodule Scrapex.GenSpider do
     is_partial? = length(data) !== length(spider.data)
     data = Enum.concat(data)
     case is_partial? do
-      :false ->
+      false ->
         {:reply, data, spider}
-      :true ->
+      true ->
         {:stop, :normal, data, spider}
     end
   end
@@ -451,12 +467,7 @@ defmodule Scrapex.GenSpider do
   The results will be handled in a different function.
   """
   def handle_info(:timeout, spider) do
-    options = spider.options
-    urls = options[:urls] || []
-
-    Logger.debug "Spider starts crawling #{IO.inspect urls}"
-
-    handle_info({:crawl, urls}, spider)
+    handle_info(:crawl, spider)
   end
 
   @doc """
@@ -465,7 +476,10 @@ defmodule Scrapex.GenSpider do
   This generates a list of async requests to the URLs. The response 
   will be sent back in another message.
   """
-  def handle_info({:crawl, urls}, spider) do
+  def handle_info(:crawl, spider) do
+    options = spider.options
+    urls = options[:urls] || []
+
     Logger.debug "Crawling #{Enum.join(urls, ", ")}"
 
     requests = urls
@@ -499,10 +513,14 @@ defmodule Scrapex.GenSpider do
 
         new_data = List.keystore(spider.data, url, 0, {url, data})
         interval = spider.options[:interval]
-        if length(requests) === 0 do
-          # Start a new crawl.
-          urls = spider.options[:urls] || []
-          send_after(self, interval, {:crawl, urls})
+        spider = case length(requests) === 0 do
+          true ->
+            # Start a new crawl.
+            urls = spider.options[:urls] || []
+            :erlang.cancel_timer(spider.timer)
+            timer = send_after(self, interval, :crawl)
+            %{spider | timer: timer}
+          false -> spider
         end
         {:noreply, %{spider | state: new_state, data: new_data}}
     end

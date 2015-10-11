@@ -267,4 +267,17 @@ defmodule Scrapex.GenSpiderTest do
     :timer.sleep(100)
     refute Process.alive?(spider)
   end
+
+  test "can request fresh data regardless of timer" do
+    opts = [urls: @opts[:urls], interval: 60000]
+    {:ok, spider} = GenSpider.start(Spider, self, @opts)
+    # First export is always fresh, and same as next export.
+    [old] = GenSpider.export(spider)
+    assert [old] === GenSpider.export(spider)
+    <<old_uuid :: 128, _rest :: binary>> = old
+
+    [new] = GenSpider.export(spider, nil, true)
+    <<new_uuid :: 128, _rest :: binary>> = new
+    assert new_uuid !== old_uuid
+  end
 end
