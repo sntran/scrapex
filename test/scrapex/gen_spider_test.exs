@@ -204,4 +204,13 @@ defmodule Scrapex.GenSpiderTest do
     assert is_binary(json)
     assert json == Poison.encode!(result)
   end
+
+  test "will await for data to export" do
+    opts = [urls: [ @ecommerce_site | @opts[:urls] ]]
+    {:ok, spider} = GenSpider.start(MapSpider, self, opts)
+    # Since we can export immediately after starting the spider, it
+    # will need to await for data.
+    data = GenSpider.export(spider)
+    assert ([%{"body" => _body1}, %{"body" => _body2}] = data)
+  end
 end

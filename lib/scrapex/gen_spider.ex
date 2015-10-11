@@ -244,7 +244,7 @@ defmodule Scrapex.GenSpider do
     end
   end
 
-  defstruct module: nil, state: nil, options: nil, data: [] 
+  defstruct module: nil, state: nil, options: nil, data: [], requests: []
 
   @doc """
   Starts a `GenSpider` process linked to the current process.
@@ -320,25 +320,15 @@ defmodule Scrapex.GenSpider do
   end
 
   @doc """
-  Exports the stored data with specific format
+  Exports the stored data with specific format.
+
+  This call will block until all data received.
   """
   @spec export(spider, format) :: any
   def export(spider, format \\ nil, override \\ false) do
+    # Await for all the data to be collected first.
+    GenServer.call(spider, :await)
     GenServer.call(spider, {:export, format, override})
-  end
-
-  @doc """
-  Asynchronously request the HTML of a URL.
-  """
-  def request(url) do
-    case HTTPoison.get(url) do
-      {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
-        {:ok, body, url}
-      {:ok, %HTTPoison.Response{status_code: 404}} ->
-        {:error, :not_found}
-      {:error, %HTTPoison.Error{reason: reason}} ->
-        {:error, reason}
-    end
   end
 
   # GenServer callbacks
@@ -373,22 +363,43 @@ defmodule Scrapex.GenSpider do
   end
 
   @doc """
+  Await for any remaining request(s) to finish.
+
+  For any remaining requests in the state, await for them to finish.
+  This function will receive the response instead of the `handle_info`
+  so it then calls the `handle_info` so that the request can be removed
+  from state and the response can be parsed by the callback module.
+
+  This function can be called in the middle of a crawl of multiple URLs
+  but since it only awaits the remaning requests, the spider's state
+  is still being passed along correctly.
+  """
+  def handle_call(:await, _from, spider) do
+    spider = 
+      spider.requests
+      |> Enum.reduce(spider, fn(request, spider) ->
+        ref = request.ref
+        response = Task.await(request)
+        {:noreply, spider} = handle_info({ref, response}, spider)
+        spider
+      end)
+    Logger.debug("Awaited for data")
+    {:reply, :ok, spider}
+  end
+
+  @doc """
   Called to export the data in a specific format.
   """
   def handle_call({:export, nil, false}, _from, spider) do
-    # case apply(spider.module, :handle_export, [format,spider.state]) do
-    #   {:stop, _reason, new_state} ->
-    #     {:stop, :normal, %{spider | state: new_state}}
-    #   {:ok, data, new_state} ->
-    #     {:reply, data, %{spider | state: new_state}}
-    # end
+    Logger.debug("Exporting data")
+    
     data = 
       spider.data
       |> Enum.map(fn({_, data}) -> data end)
       |> Enum.concat
     {:reply, data, spider}
   end
-  
+
   def handle_call({:export, :json, override?}, from, spider) do
     {_, data, _} = handle_call({:export, nil, override?}, from, spider)
     {:reply, Poison.encode!(data), spider}
@@ -421,24 +432,22 @@ defmodule Scrapex.GenSpider do
 
     Logger.debug "Spider starts crawling #{IO.inspect urls}"
 
-    urls |> Enum.each(fn(url) ->
-      handle_info({:crawl, url}, spider)
-    end)
-    {:noreply, spider}
+    handle_info({:crawl, urls}, spider)
   end
 
   @doc """
-  Called from a timer to crawl a URL.
+  Called from a timer to crawl a list of URLs.
 
-  This generates an async task to request to a URL. The response will
-  be sent back in another message through `Task` mechanism.
+  This generates a list of async requests to the URLs. The response 
+  will be sent back in another message.
   """
-  def handle_info({:crawl, url}, spider) do
-    Logger.debug "Crawling #{url}"
-    Task.async(fn() -> 
-      request(url)
-    end)
-    {:noreply, spider}
+  def handle_info({:crawl, urls}, spider) do
+    Logger.debug "Crawling #{Enum.join(urls, ", ")}"
+
+    requests = urls
+    |> Enum.map(&Task.async(fn -> request(&1) end))
+
+    {:noreply, %{spider | requests: requests}}
   end
 
   @doc """
@@ -447,24 +456,50 @@ defmodule Scrapex.GenSpider do
   When a request is completed, i.e. receives the response, this process
   receives a message with the result. We then call the `parse` function
   of the callback module.
+
+  If this is for the last request, it sets a new timer if needed.
   """
-  def handle_info({_ref, {:ok, result, url}}, spider) do
+  def handle_info({ref, msg = {:ok, result, url}}, spider) do
     Logger.debug "Got data from #{url}"
+
+    requests = spider.requests
+    # Remove this request from the list.
+    requests = Enum.filter(requests, &(&1.ref !== ref))
+    spider = %{spider | requests: requests}
+
     case apply(spider.module, :parse, [result, spider.state]) do
       {:stop, reason, new_state} ->
         Logger.debug "Spider is stopped with reason #{IO.inspect reason}"
         {:stop, :normal, %{spider | state: new_state}}
       {:ok, data, new_state} ->
+
         new_data = List.keystore(spider.data, url, 0, {url, data})
         interval = spider.options[:interval]
-        # Start a new crawl.
-        send_after(self, interval, {:crawl, url})
+        if length(requests) === 0 do
+          # Start a new crawl.
+          urls = spider.options[:urls] || []
+          send_after(self, interval, {:crawl, urls})
+        end
         {:noreply, %{spider | state: new_state, data: new_data}}
     end
   end
 
   def handle_info(_info, state) do
     {:noreply, state}
+  end
+
+  @doc """
+  Asynchronously request the HTML of a URL.
+  """
+  defp request(url) do
+    case HTTPoison.get(url) do
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
+        {:ok, body, url}
+      {:ok, %HTTPoison.Response{status_code: 404}} ->
+        {:error, :not_found}
+      {:error, %HTTPoison.Error{reason: reason}} ->
+        {:error, reason}
+    end
   end
 
   defp send_after(_dest, nil, _message) do
