@@ -34,7 +34,7 @@ defmodule Scrapex.Selector do
   @doc """
   Extracts content or attribute value for a selection.
   """
-  @spec select(t, selector) :: [binary]
+  @spec extract(t, name) :: [binary]
   def extract(selector), do: extract(selector, "text")
   def extract(%Selector{tree: tree}, "text") do
     Enum.map(tree, fn({_, _, [text]}) -> text end)

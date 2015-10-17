@@ -186,8 +186,8 @@ defmodule Scrapex.GenSpiderTest do
       case tester.(result) do
         {:stop, reason} ->
           {:stop, reason, tester}
-        _ -> 
-        {:ok, result, tester}
+        {:test_result, result} -> 
+          {:ok, result, tester}
       end
     end
     
@@ -195,8 +195,9 @@ defmodule Scrapex.GenSpiderTest do
 
   test "returned map can be exported to json" do
     tester = self
-    callback = fn(result) -> send tester, {:test_result, result} end
+    callback = &(send(tester, {:test_result, &1}))
     {:ok, spider} = GenSpider.start(MapSpider, callback, @opts)
+
     assert_receive({:test_result, result}, 300)
     json = GenSpider.export(spider, :json)
     assert is_binary(json)
@@ -205,8 +206,9 @@ defmodule Scrapex.GenSpiderTest do
 
   test "can export using an encoder" do
     tester = self
-    callback = fn(result) -> send tester, {:test_result, result} end
+    callback = &(send(tester, {:test_result, &1}))
     {:ok, spider} = GenSpider.start(MapSpider, callback, @opts)
+
     assert_receive({:test_result, result}, 300)
     json = GenSpider.export(spider, &Poison.encode!/1)
     assert is_binary(json)
@@ -215,9 +217,10 @@ defmodule Scrapex.GenSpiderTest do
 
   test "will await for data to export" do
     tester = self
-    callback = fn(result) -> send tester, {:test_result, result} end
+    callback = &(send(tester, {:test_result, &1}))
     opts = [urls: [ @ecommerce_site | @opts[:urls] ]]
     {:ok, spider} = GenSpider.start(MapSpider, callback, opts)
+
     # Since we can export immediately after starting the spider, it
     # will need to await for data.
     data = GenSpider.export(spider)
