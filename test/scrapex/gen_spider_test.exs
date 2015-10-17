@@ -283,4 +283,68 @@ defmodule Scrapex.GenSpiderTest do
     <<new_uuid :: 128, _rest :: binary>> = new
     assert new_uuid !== old_uuid
   end
+
+  test "can request for links during parsing" do
+    # Instead of returning the parsed data, `parse` function
+    # can return an async task, which will be awaited and merge
+    # to the data.
+
+    # Since this test is made without knowledge of selector engine,
+    # we simply request other URL and return that body instead.
+    callback = fn(_) ->
+      # The final callback will send test result to this test proces,
+      # but also return that tuple, which is what `GenSpider.await/1`
+      # returns.
+      # `GenSpider.request/2` returns an asynchronous task.
+      request = GenSpider.request(@ecommerce_site, fn
+        ({:ok, body, url}) -> {:test_result, [body]}
+      end)
+      # That task can be awaited.
+      {:test_result, body} = GenSpider.await(request)
+      {:test_result, body}
+    end
+
+    {:ok, spider} = GenSpider.start(MapSpider, callback, @opts)
+    [data] = GenSpider.export(spider)
+    assert data === HTTPoison.get!(@ecommerce_site).body
+  end
+
+  test "parse function can return an async request" do
+    callback = fn(_) ->
+      request = GenSpider.request(@ecommerce_site, fn
+        ({:ok, body, url}) -> [body]
+      end)
+      {:test_result, request}
+    end
+
+    {:ok, spider} = GenSpider.start(MapSpider, callback, @opts)
+    [data] = GenSpider.export(spider)
+    assert data === HTTPoison.get!(@ecommerce_site).body
+  end
+
+  test "parse function can return multiple async requests" do
+    # Can be used to follow multiple links on a page.
+    # Results will be concatenated.
+    urls = [ @ecommerce_site | @opts[:urls] ]
+
+    callback = fn(_) ->
+      requests =
+      urls
+      |> Enum.map(fn(url) ->
+        GenSpider.request(url, fn
+          ({:ok, body, url}) -> [body]
+        end)
+      end)
+      {:test_result, requests}
+    end
+
+    {:ok, spider} = GenSpider.start(MapSpider, callback, @opts)
+    data = GenSpider.export(spider)
+
+    actual =
+    urls
+    |> Enum.map(&(HTTPoison.get!(&1).body))
+
+    assert data === actual
+  end
 end

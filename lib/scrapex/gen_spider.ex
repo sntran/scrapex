@@ -1,5 +1,6 @@
 defmodule Scrapex.GenSpider do
   alias Scrapex.GenSpider
+  alias Task, as: Request
   require Logger
   @moduledoc """
   A behaviour module for implementing a web data extractor.
@@ -352,6 +353,16 @@ defmodule Scrapex.GenSpider do
     GenServer.call(spider, {:export, format, override})
   end
 
+  def request(url, callback) do
+    Request.async(fn -> 
+      url
+      |> do_request()
+      |> callback.()
+    end)
+  end
+
+  def await(request), do: Request.await(request)
+
   # GenServer callbacks
 
   def init({module, args, opts}) do
@@ -401,7 +412,7 @@ defmodule Scrapex.GenSpider do
       spider.requests
       |> Enum.reduce_while(spider, fn(request, spider) ->
         ref = request.ref
-        response = Task.await(request)
+        response = Request.await(request)
         case handle_info({ref, response}, spider) do
           {:noreply, spider} ->
             {:cont, spider}
@@ -483,7 +494,7 @@ defmodule Scrapex.GenSpider do
     Logger.debug "Crawling #{Enum.join(urls, ", ")}"
 
     requests = urls
-    |> Enum.map(&Task.async(fn -> request(&1) end))
+    |> Enum.map(&Request.async(fn -> do_request(&1) end))
 
     {:noreply, %{spider | requests: requests}}
   end
@@ -509,7 +520,15 @@ defmodule Scrapex.GenSpider do
       {:stop, reason, new_state} ->
         Logger.debug "Spider is stopped with reason #{reason}"
         {:stop, :normal, %{spider | state: new_state}}
+
       {:ok, data, new_state} ->
+        data = case data do
+          %Request{} -> Request.await(data)
+          [%Request{}|_] -> 
+            Stream.map(data, &Request.await(&1))
+            |> Enum.concat
+          _ -> data
+        end
 
         new_data = List.keystore(spider.data, url, 0, {url, data})
         interval = spider.options[:interval]
@@ -530,7 +549,7 @@ defmodule Scrapex.GenSpider do
     {:noreply, state}
   end
 
-  defp request(url) do
+  defp do_request(url) do
     case HTTPoison.get(url) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
         {:ok, body, url}
