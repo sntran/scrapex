@@ -43,5 +43,24 @@ defmodule Scrapex.Selector do
     Floki.attribute(tree, attr)
   end
   
-  
+  defimpl Enumerable, for: __MODULE__ do
+    alias Scrapex.Selector
+
+    def count(%Selector{tree: tree}), do: length(tree)
+    def member?(api = %Selector{}, selector) do
+      Selector.select(api, selector) !== []
+    end
+
+    def reduce(_api, {:halt, acc}, _fun), do: {:halted, acc}
+    def reduce(api, {:suspend, acc}, fun) do
+      {:suspended, acc, &reduce(api, &1, fun)}
+    end
+    def reduce(%Selector{tree: []}, {:cont, acc}, _fun) do
+      {:done, acc}
+    end
+    def reduce(%Selector{tree: [h | t]}, {:cont, acc}, fun) do
+      new_acc = fun.(%Selector{tree: h}, acc)
+      reduce(%Selector{tree: t}, new_acc, fun)
+    end
+  end
 end
