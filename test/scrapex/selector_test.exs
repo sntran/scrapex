@@ -3,7 +3,7 @@ defmodule Scrapex.SelectorTest do
   import Scrapex.Selector
 
   setup_all do
-    url = "http://localhost:9090/example.com.html"
+    url = "http://localhost:9090/e-commerce/static/index.html"
     html = HTTPoison.get!(url).body
 
     # No metadata
@@ -12,10 +12,10 @@ defmodule Scrapex.SelectorTest do
 
   test "parse CSS selector", context do
     [href] = context.body
-    |> select("a[href^=http]")
+    |> select("a.navbar-brand")
     |> extract("href")
 
-    assert href === "http://www.iana.org/domains/example"
+    assert href === "/"
   end
 
   test "select text content", context do
@@ -23,7 +23,7 @@ defmodule Scrapex.SelectorTest do
     |> select("h1")
     |> extract("text")
 
-    assert h1 === "Example Domain"
+    assert h1 === "E-commerce training site"
   end
 
   test "default to get content", context do
@@ -31,14 +31,14 @@ defmodule Scrapex.SelectorTest do
     |> select("h1")
     |> extract()
 
-    assert h1 === "Example Domain"
+    assert h1 === "E-commerce training site"
   end
 
   test "select text content and children content", context do
-    [link_text] = context.body
-    |> select("p ~ p")
+    link_texts = context.body
+    |> select("a.category-link")
     |> extract()
 
-    assert link_text === "More information..."
+    assert link_texts === ["Computers", "Phones"]
   end
 end
