@@ -1,11 +1,11 @@
 defmodule Scrapex.Spider.ExampleTest do
   use ExUnit.Case
 
+  alias Scrapex.GenSpider
   alias Spider.Example
   import Scrapex.Selector
 
   defmodule Example do
-    alias Scrapex.GenSpider
     use GenSpider
 
     # Client
@@ -31,8 +31,8 @@ defmodule Scrapex.Spider.ExampleTest do
     end
   end
 
-  def parse_product(html) do
-    html 
+  def parse_product(response) do
+    response.body 
     |> select(".thumbnail")
     |> Enum.map(fn(selector) ->
       [name] = selector |> select(".title") |> extract
@@ -47,5 +47,27 @@ defmodule Scrapex.Spider.ExampleTest do
     {:ok, spider} = Example.start_link(&parse_product/1)
     results = Example.export(spider)
     assert length(results) === 3
+  end
+
+  test "can follow links" do
+    parser = fn(response) ->
+      response.body 
+      |> select("#side-menu .category-link")
+      |> Enum.flat_map(fn(anchor) ->
+        [href] = anchor |> extract("href")
+        full_url = GenSpider.Response.url_join(response, href) <> "/index.html"
+        [category] = anchor |> extract()
+
+        GenSpider.request(full_url, fn({:ok, response}) ->
+          parse_product(response)
+        end)
+        |> GenSpider.await()
+        |> Enum.map(&Map.put(&1, "category", category))
+      end)
+    end
+
+    {:ok, spider} = Example.start_link(parser)
+    results = Example.export(spider)
+    assert length(results) === 6
   end
 end

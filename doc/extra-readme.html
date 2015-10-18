@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta http-equiv="x-ua-compatible" content="ie=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>README – Scrapex v0.0.1</title>
+    <title>README – Scrapex v0.1.0</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="generator" content="ExDoc v0.10.0">
     <link rel="stylesheet" href="dist/app.css" />
@@ -28,7 +28,7 @@
         Scrapex
       </h1>
       <h2 class="sidebar-projectVersion">
-        v0.0.1
+        v0.1.0
       </h2>
     </div>
     
@@ -69,35 +69,57 @@
 <p>Extensible by design, plug new functionality easily without having to touch the core.</p>
 <h3>Portable, Elixir</h3>
 <p>Written in Elixir and runs on Linux, Windows, Mac, BSD, and embedded devices.</p>
-<h2 id="Build-your-own-webcrawlers"> Build your own webcrawlers</h2><pre><code class="elixir">defmodule BlogSpider do
+<h2 id="Build-your-own-webcrawlers"> Build your own webcrawlers</h2><pre><code class="elixir">alias Scrapex.GenSpider
+defmodule StackOverflowSpider do
   use GenSpider
+  import Scrapex.Selector
 
-  @start_urls [&quot;http://blog.scrapinghub.com&quot;]
-
-  def parse(response, %{&quot;selectors&quot; =&gt; selectors}) do
-    response
-    |&gt; css(&quot;ul li a::attr(\&quot;href\&quot;)&quot;)
-    |&gt; re(~r/.*/\d\d\d\d/\d\d/$/)
-    |&gt; Enum.map(fn(url) -&gt;
-      Scrapex.Request(urljoin(url), &amp;parse_titles/1)
+  def parse(response, state) do
+    result = response.body
+    |&gt; select(&quot;.question-summary h3 a&quot;)
+    |&gt; extract(&quot;href&quot;)
+    |&gt; Enum.map(fn(href) -&gt;
+      GenSpider.Response.url_join(response, href)
+      |&gt; GenSpider.request(&amp;parse_question/1)
+      |&gt; GenSpider.await
     end)
+    {:ok, result, state}
   end
 
-  defp parse_titles(response) do
-    response
-    |&gt; css(&quot;div.entries &gt; ul &gt; li a::text&quot;)
-    |&gt; extract()
-    |&gt; Enum.map(fn(post_title) -&gt; %{&quot;title&quot; =&gt; post_title} end)
+  defp parse_question({:ok, response}) do
+    html = response.body
+    [title] = html |&gt; select(&quot;h1 a&quot;) |&gt; extract()
+    question = html |&gt; select(&quot;.question&quot;)
+    [body] = question |&gt; select(&quot;.post-text&quot;) |&gt; extract
+    [votes] = question |&gt; select(&quot;.vote-count-post&quot;) |&gt; extract
+    tags = question |&gt; select(&quot;.post-tag&quot;) |&gt; extract
+
+    %{title: title, body: body, votes: votes, tags: tags}
   end
 end
-
-# Start the spider
-opts = name: :webscrapper
-{:ok, pid} = GenSpider.start_link(BlogSpider, sitemap, opts)
-
-# This is the client
-GenSpider.export(pid, :json)
+urls = [&quot;http://stackoverflow.com/questions?sort=votes&quot;]
+opts = [name: :webscrapper, urls: urls]
+{:ok, spider} = GenSpider.start_link(StackOverflowSpider, [], opts)
+questions = GenSpider.export(spider)
 #=&gt; &quot;[{} | _]&quot;</code></pre>
+<h2 id="TODOS"> TODOS</h2><ul>
+<li>[x] <code class="inline">GenSpider behaviour</code>.
+</li>
+<li>[x] Request URL and pass response to <code class="inline">parse/2</code> callback.
+</li>
+<li>[x] One time spider
+</li>
+<li>[x] CSS selector
+</li>
+<li>[ ] XPath selector
+</li>
+<li>[x] Yield for requests in <code class="inline">parse/2</code>
+</li>
+<li>[ ] Parse response chunk by chunk
+</li>
+<li>[ ] CLI
+</li>
+</ul>
 
     <footer class="footer">
       <p>

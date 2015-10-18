@@ -1,4 +1,8 @@
 defmodule Scrapex.Selector do
+  @moduledoc """
+  Utilities for extracting data from markup language.
+  """
+  
   use GenServer
   alias Scrapex.Selector
 
@@ -20,7 +24,7 @@ defmodule Scrapex.Selector do
   @doc """
   Generates a selection for a particular selector.
 
-  The return value is
+  The return value is a Selector.t
   """
   @spec select(binary | t, selector) :: t
   def select(html, selector) when is_binary(html) do
@@ -37,10 +41,23 @@ defmodule Scrapex.Selector do
   @spec extract(t, name) :: [binary]
   def extract(selector), do: extract(selector, "text")
   def extract(%Selector{tree: tree}, "text") do
-    Enum.map(tree, fn({_, _, [text]}) -> text end)
+    Enum.map(tree, fn({_, _, children}) -> 
+      extract_text(children, "")
+    end)
   end
   def extract(%Selector{tree: tree}, attr) do
     Floki.attribute(tree, attr)
+  end
+
+  defp extract_text(children), do: extract_text(children, "")
+  defp extract_text([], result), do: result
+  defp extract_text([text|rest], result) 
+  when is_binary(text) 
+  do
+    extract_text(rest, result <> text)
+  end
+  defp extract_text([{_, _, children}|rest], result) do
+    extract_text(rest, result <> extract_text(children))
   end
   
   defimpl Enumerable, for: __MODULE__ do
@@ -59,7 +76,7 @@ defmodule Scrapex.Selector do
       {:done, acc}
     end
     def reduce(%Selector{tree: [h | t]}, {:cont, acc}, fun) do
-      new_acc = fun.(%Selector{tree: h}, acc)
+      new_acc = fun.(%Selector{tree: [h]}, acc)
       reduce(%Selector{tree: t}, new_acc, fun)
     end
   end

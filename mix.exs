@@ -1,7 +1,7 @@
 defmodule Scrapex.Mixfile do
   use Mix.Project
 
-  @version "0.0.4"
+  @version "0.1.0"
 
   def project do
     [app: :scrapex,
@@ -53,7 +53,7 @@ defmodule Scrapex.Mixfile do
   end
 
   defp package do
-    [contributors: ["Son Tran-Nguyen", "Steven Fippinger"],
+    [contributors: ["Son Tran-Nguyen"],
      licenses: ["MIT"],
      links: %{bitbucket: "https://bitbucket.org/inhuman/scrapex"},
      files: ~w(lib priv test) ++

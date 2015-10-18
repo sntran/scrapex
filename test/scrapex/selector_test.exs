@@ -33,4 +33,12 @@ defmodule Scrapex.SelectorTest do
 
     assert h1 === "Example Domain"
   end
+
+  test "select text content and children content", context do
+    [link_text] = context.body
+    |> select("p ~ p")
+    |> extract()
+
+    assert link_text === "More information..."
+  end
 end

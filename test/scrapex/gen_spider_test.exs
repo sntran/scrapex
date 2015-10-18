@@ -1,6 +1,7 @@
 defmodule Scrapex.GenSpiderTest do
   use ExUnit.Case
   alias Scrapex.GenSpider
+  doctest GenSpider
 
   @example_com "http://localhost:9090/example.com.html"
   @ecommerce_site "http://localhost:9090/e-commerce/static/index.html"
@@ -57,8 +58,8 @@ defmodule Scrapex.GenSpiderTest do
       end
 
       def parse(response, tester) do
-        send tester, {:test_result, response}
-        {:ok, response, tester}
+        send tester, {:test_result, response.body}
+        {:ok, response.body, tester}
       end
       
     end
@@ -77,8 +78,8 @@ defmodule Scrapex.GenSpiderTest do
       end
 
       def parse(response, tester) do
-        send tester, {:test_result, response}
-        {:ok, response, tester}
+        send tester, {:test_result, response.body}
+        {:ok, response.body, tester}
       end
       
     end
@@ -98,8 +99,8 @@ defmodule Scrapex.GenSpiderTest do
       end
 
       def parse(response, tester) do
-        send tester, {:test_result, response}
-        {:ok, [response], tester}
+        send tester, {:test_result, response.body}
+        {:ok, [response.body], tester}
       end
       
     end
@@ -121,9 +122,9 @@ defmodule Scrapex.GenSpiderTest do
     end
 
     def parse(response, tester) do
-      send tester, {:test_result, response}
+      send tester, {:test_result, response.body}
       uuid = :crypto.strong_rand_bytes(8) |> Base.encode16
-      {:ok, [uuid <> response], tester}
+      {:ok, [uuid <> response.body], tester}
     end
     
   end
@@ -182,7 +183,7 @@ defmodule Scrapex.GenSpiderTest do
     end
 
     def parse(response, tester) do
-      result = [%{"body" => response}]
+      result = [%{"body" => response.body}]
       case tester.(result) do
         {:stop, reason} ->
           {:stop, reason, tester}
@@ -297,7 +298,7 @@ defmodule Scrapex.GenSpiderTest do
       # returns.
       # `GenSpider.request/2` returns an asynchronous task.
       request = GenSpider.request(@ecommerce_site, fn
-        ({:ok, body, url}) -> {:test_result, [body]}
+        ({:ok, response}) -> {:test_result, [response.body]}
       end)
       # That task can be awaited.
       {:test_result, body} = GenSpider.await(request)
@@ -312,7 +313,7 @@ defmodule Scrapex.GenSpiderTest do
   test "parse function can return an async request" do
     callback = fn(_) ->
       request = GenSpider.request(@ecommerce_site, fn
-        ({:ok, body, url}) -> [body]
+        ({:ok, response}) -> [response.body]
       end)
       {:test_result, request}
     end
@@ -332,7 +333,7 @@ defmodule Scrapex.GenSpiderTest do
       urls
       |> Enum.map(fn(url) ->
         GenSpider.request(url, fn
-          ({:ok, body, url}) -> [body]
+          ({:ok, response}) -> [response.body]
         end)
       end)
       {:test_result, requests}

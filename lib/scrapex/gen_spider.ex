@@ -1,8 +1,10 @@
 defmodule Scrapex.GenSpider do
   alias Scrapex.GenSpider
   alias Task, as: Request
+  alias GenSpider.Response
+
   require Logger
-  @moduledoc """
+  @moduledoc ~S"""
   A behaviour module for implementing a web data extractor.
 
   A GenSpider is a process as any other Elixir process and it can be
@@ -15,40 +17,44 @@ defmodule Scrapex.GenSpider do
   Users are only required to implement the callbacks and functionality
   they are interested in.
 
-  Imagine we want a GenSpider that takes a list of selectors exported
-  from http://webscraper.io/ and follow them to get the data.
+  Imagine we want a GenSpider that follows the links to the top voted 
+  questions on StackOverflow and scrapes some data from each page:
 
-      defmodule WebScrapper do
-        use GenSpider
+      iex> alias Scrapex.GenSpider
+      iex> defmodule StackOverflowSpider do
+      ...>   use GenSpider
+      ...>   import Scrapex.Selector
+      ...>   
+      ...>   def parse(response, state) do
+      ...>     result = response.body
+      ...>     |> select(".question-summary h3 a")
+      ...>     |> extract("href")
+      ...>     |> Enum.map(fn(href) ->
+      ...>       GenSpider.Response.url_join(response, href)
+      ...>       |> GenSpider.request(&parse_question/1)
+      ...>       |> GenSpider.await
+      ...>     end)
+      ...>     {:ok, result, state}
+      ...>   end
+      ...> 
+      ...>   defp parse_question({:ok, response}) do
+      ...>     html = response.body
+      ...>     [title] = html |> select("h1 a") |> extract()
+      ...>     question = html |> select(".question")
+      ...>     [body] = question |> select(".post-text") |> extract
+      ...>     [votes] = question |> select(".vote-count-post") |> extract
+      ...>     tags = question |> select(".post-tag") |> extract
+      ...>     
+      ...>     %{title: title, body: body, votes: votes, tags: tags}
+      ...>   end
+      ...> end
+      iex> urls = ["http://stackoverflow.com/questions?sort=votes"]
+      iex> opts = [name: :webscrapper, urls: urls]
+      iex> {:ok, spider} = GenSpider.start_link(StackOverflowSpider, [], opts)
+      iex> [top_question|_] = GenSpider.export(spider)
+      iex> top_question.title
+      "Why is processing a sorted array faster than an unsorted array?"
 
-        # Callbacks
-
-        def init(%{"selectors"=> selectors}) do
-          %{"selectors" => selectors, "data" => []}
-        end
-        
-        def parse(response, %{"selectors" => selectors}) do
-          # Wrap the HTML with a Css selector engine.
-          engine = GenSpider.CssSelector(response)
-          Enum.map(selectors, fn(selector) ->
-            selector
-            |> engine.select()
-            |> engine.extract()
-          end)
-        end
-      end
-
-      # Start the spider
-      sitemap = File.read!("sitemap.json") |> Poison.decode!
-      opts =  name: :webscrapper,
-              urls: [sitemap["siteUrl"]], 
-              interval: 3600
-      {:ok, pid} = GenSpider.start_link(WebScrapper, sitemap, opts)
-
-
-      # This is the client
-      GenSpider.export(pid, :json)
-      #=> "[{} | _]"
 
   We start our `WebScrapper` by calling `start_link/3`, passing the
   module with the spider implementation and its initial argument (a
@@ -79,16 +85,9 @@ defmodule Scrapex.GenSpider do
       a URL successfully with a HTML in `response`.
 
       It must return:
-      -  `{:ok, new_state}`
+      -  `{:ok, result, new_state}`
       -  `{:ignore, new_state}`
       -  `{:stop, reason, new_state}`
-
-    * `handle_export(type, state)` - invoked to handle `export` call.
-
-      It must return:
-      -  `{:ok, data, new_state}`
-      -  `{:stop, reason, new_state}`
-      -  `{:stop, reason, data, new_state}`
 
     * `terminate(reason, state)` - called when the server is about to
       terminate, useful for cleaning up. It must return `:ok`.
@@ -108,17 +107,16 @@ defmodule Scrapex.GenSpider do
   Instead, we wrap the calls in new functions representing the public
   API of the spider.
 
-  Here is a better implementation of our WebScrapper module:
+  Here is a better implementation of our StackOverflowSpider module:
 
-      defmodule WebScrapper do
+      defmodule StackOverflowSpider do
         use GenSpider
 
         # Client
         def start_link(sitemap) do
-          opts =  [name: :webscrapper,
-              urls: [sitemap["siteUrl"]], 
-              interval: 3600]
-          GenSpider.start_link(__MODULE__, sitemap, opts)
+          urls = ["http://stackoverflow.com/questions?sort=votes"]
+          opts =  [name: :stackoverflow, urls: urls, interval: 3600]
+          GenSpider.start_link(__MODULE__, [], opts)
         end
 
         def json(pid) do
@@ -127,23 +125,27 @@ defmodule Scrapex.GenSpider do
         
         # Server (callbacks)
 
-        def init(%{"selectors"=> selectors}) do
-          %{"selectors" => selectors, "data" => []}
-        end
-        
-        def parse(response, %{"selectors" => selectors}) do
-          # Wrap the HTML with a Css selector engine.
-          engine = GenSpider.CssSelector(response)
-          Enum.map(selectors, fn(selector) ->
-            selector
-            |> engine.select()
-            |> engine.extract()
+        def parse(response, state) do
+          result = response.body
+          |> select(".question-summary h3 a")
+          |> extract("href")
+          |> Enum.map(fn(href) ->
+            GenSpider.Response.url_join(response, href)
+            |> GenSpider.request(&parse_question/1)
+            |> GenSpider.await
           end)
+          {:ok, result, state}
         end
 
-        def handle_export(:json, state) do
-          # Call the default implementation from GenSpider
-          super(:json, state)
+        defp parse_question({:ok, response}) do
+          html = response.body
+          [title] = html |> select("h1 a") |> extract()
+          question = html |> select(".question")
+          [body] = question |> select(".post-text") |> extract
+          [votes] = question |> select(".vote-count-post") |> extract
+          tags = question |> select(".post-tag") |> extract
+          
+          %{title: title, body: body, votes: votes, tags: tags}
         end
       end
 
@@ -349,10 +351,13 @@ defmodule Scrapex.GenSpider do
   @spec export(spider, format, boolean) :: any
   def export(spider, format \\ nil, override \\ false) do
     # Await for all the data to be collected first.
-    GenServer.call(spider, :await)
+    GenServer.call(spider, :await, 30000)
     GenServer.call(spider, {:export, format, override})
   end
 
+  @doc """
+  Makes an asynchronous request to a URL with a callback.
+  """
   def request(url, callback) do
     Request.async(fn -> 
       url
@@ -508,7 +513,8 @@ defmodule Scrapex.GenSpider do
 
   If this is for the last request, it sets a new timer if needed.
   """
-  def handle_info({ref, {:ok, result, url}}, spider) do
+  def handle_info({ref, {:ok, response}}, spider) do
+    url = response.url
     Logger.debug "Got data from #{url}"
 
     requests = spider.requests
@@ -516,7 +522,7 @@ defmodule Scrapex.GenSpider do
     requests = Enum.filter(requests, &(&1.ref !== ref))
     spider = %{spider | requests: requests}
 
-    case apply(spider.module, :parse, [result, spider.state]) do
+    case apply(spider.module, :parse, [response, spider.state]) do
       {:stop, reason, new_state} ->
         Logger.debug "Spider is stopped with reason #{reason}"
         {:stop, :normal, %{spider | state: new_state}}
@@ -535,7 +541,6 @@ defmodule Scrapex.GenSpider do
         spider = case length(requests) === 0 do
           true ->
             # Start a new crawl.
-            urls = spider.options[:urls] || []
             :erlang.cancel_timer(spider.timer)
             timer = send_after(self, interval, :crawl)
             %{spider | timer: timer}
@@ -552,7 +557,7 @@ defmodule Scrapex.GenSpider do
   defp do_request(url) do
     case HTTPoison.get(url) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
-        {:ok, body, url}
+        {:ok, %Response{url: url, body: body}}
       {:ok, %HTTPoison.Response{status_code: 404}} ->
         {:error, :not_found}
       {:error, %HTTPoison.Error{reason: reason}} ->

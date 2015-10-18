@@ -16,42 +16,47 @@ Written in Elixir and runs on Linux, Windows, Mac, BSD, and embedded devices.
 
 ## Build your own webcrawlers
 
-    defmodule BlogSpider do
+    alias Scrapex.GenSpider
+    defmodule StackOverflowSpider do
       use GenSpider
-
-      @start_urls ["http://blog.scrapinghub.com"]
+      import Scrapex.Selector
       
-      def parse(response, %{"selectors" => selectors}) do
-        response
-        |> css("ul li a::attr(\"href\")")
-        |> re(~r/.*/\d\d\d\d/\d\d/$/)
-        |> Enum.map(fn(url) ->
-          await request(urljoin(url), &parse_titles/1)
+      def parse(response, state) do
+        result = response.body
+        |> select(".question-summary h3 a")
+        |> extract("href")
+        |> Enum.map(fn(href) ->
+          GenSpider.Response.url_join(response, href)
+          |> GenSpider.request(&parse_question/1)
+          |> GenSpider.await
         end)
+        {:ok, result, state}
       end
-
-      defp parse_titles(response) do
-        response
-        |> css("div.entries > ul > li a::text")
-        |> extract()
-        |> Enum.map(fn(post_title) -> %{"title" => post_title} end)
+      
+      defp parse_question({:ok, response}) do
+        html = response.body
+        [title] = html |> select("h1 a") |> extract()
+        question = html |> select(".question")
+        [body] = question |> select(".post-text") |> extract
+        [votes] = question |> select(".vote-count-post") |> extract
+        tags = question |> select(".post-tag") |> extract
+        
+        %{title: title, body: body, votes: votes, tags: tags}
       end
     end
-
-    # Start the spider
-    opts = name: :webscrapper
-    {:ok, pid} = GenSpider.start_link(BlogSpider, sitemap, opts)
-
-    # This is the client
-    GenSpider.export(pid, :json)
+    urls = ["http://stackoverflow.com/questions?sort=votes"]
+    opts = [name: :webscrapper, urls: urls]
+    {:ok, spider} = GenSpider.start_link(StackOverflowSpider, [], opts)
+    questions = GenSpider.export(spider)
     #=> "[{} | _]"
 
 ## TODOS
 
 - [x] `GenSpider behaviour`.
-- [x] Request URL and pass response to `parse` callback.
-- [ ] One time spider
-- [ ] CSS selector
+- [x] Request URL and pass response to `parse/2` callback.
+- [x] One time spider
+- [x] CSS selector
 - [ ] XPath selector
+- [x] Yield for requests in `parse/2`
 - [ ] Parse response chunk by chunk
 - [ ] CLI

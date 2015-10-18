@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta http-equiv="x-ua-compatible" content="ie=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Scrapex.GenSpider – Scrapex v0.0.1</title>
+    <title>Scrapex.GenSpider – Scrapex v0.1.0</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="generator" content="ExDoc v0.10.0">
     <link rel="stylesheet" href="dist/app.css" />
@@ -28,7 +28,7 @@
         Scrapex
       </h1>
       <h2 class="sidebar-projectVersion">
-        v0.0.1
+        v0.1.0
       </h2>
     </div>
     
@@ -64,10 +64,8 @@
       <h1>
         Scrapex.GenSpider
         
-          <small>behaviour</small>
         
-        
-          <a href="https://bitbucket.org/inhuman/scrapex/src/v0.0.1/lib/scrapex/gen_spider.ex#cl-1" title="View Source" class="view-source" rel="help">
+          <a href="https://bitbucket.org/inhuman/scrapex/src/v0.1.0/lib/scrapex/gen_spider.ex#cl-1" title="View Source" class="view-source" rel="help">
             <i class="icon-code"></i>
           </a>
         
@@ -83,39 +81,42 @@ and repeat on an interval.</p>
 <p>The GenSpider behaviour abstracts the common data extraction process.
 Users are only required to implement the callbacks and functionality
 they are interested in.</p>
-<p>Imagine we want a GenSpider that takes a list of selectors exported
-from <a href="http://webscraper.io/">http://webscraper.io/</a> and follow them to get the data.</p>
-<pre><code class="elixir">defmodule WebScrapper do
-  use GenSpider
-
-  # Callbacks
-
-  def init(%{&quot;selectors&quot;=&gt; selectors}) do
-    %{&quot;selectors&quot; =&gt; selectors, &quot;data&quot; =&gt; []}
-  end
-
-  def parse(response, %{&quot;selectors&quot; =&gt; selectors}) do
-    # Wrap the HTML with a Css selector engine.
-    engine = GenSpider.CssSelector(response)
-    Enum.map(selectors, fn(selector) -&gt;
-      selector
-      |&gt; engine.select()
-      |&gt; engine.extract()
-    end)
-  end
-end
-
-# Start the spider
-sitemap = File.read!(&quot;sitemap.json&quot;) |&gt; Poison.decode!
-opts =  name: :webscrapper,
-        urls: [sitemap[&quot;siteUrl&quot;]], 
-        interval: 3600
-{:ok, pid} = GenSpider.start_link(WebScrapper, sitemap, opts)
-
-
-# This is the client
-GenSpider.export(pid, :json)
-#=&gt; &quot;[{} | _]&quot;</code></pre>
+<p>Imagine we want a GenSpider that follows the links to the top voted 
+questions on StackOverflow and scrapes some data from each page:</p>
+<pre><code class="iex elixir">iex&gt; alias Scrapex.GenSpider
+iex&gt; defmodule StackOverflowSpider do
+...&gt;   use GenSpider
+...&gt;   import Scrapex.Selector
+...&gt;   
+...&gt;   def parse(response, state) do
+...&gt;     result = response.body
+...&gt;     |&gt; select(&quot;.question-summary h3 a&quot;)
+...&gt;     |&gt; extract(&quot;href&quot;)
+...&gt;     |&gt; Enum.map(fn(href) -&gt;
+...&gt;       GenSpider.Response.url_join(response, href)
+...&gt;       |&gt; GenSpider.request(&amp;parse_question/1)
+...&gt;       |&gt; GenSpider.await
+...&gt;     end)
+...&gt;     {:ok, result, state}
+...&gt;   end
+...&gt; 
+...&gt;   defp parse_question({:ok, response}) do
+...&gt;     html = response.body
+...&gt;     [title] = html |&gt; select(&quot;h1 a&quot;) |&gt; extract()
+...&gt;     question = html |&gt; select(&quot;.question&quot;)
+...&gt;     [body] = question |&gt; select(&quot;.post-text&quot;) |&gt; extract
+...&gt;     [votes] = question |&gt; select(&quot;.vote-count-post&quot;) |&gt; extract
+...&gt;     tags = question |&gt; select(&quot;.post-tag&quot;) |&gt; extract
+...&gt;     
+...&gt;     %{title: title, body: body, votes: votes, tags: tags}
+...&gt;   end
+...&gt; end
+iex&gt; urls = [&quot;http://stackoverflow.com/questions?sort=votes&quot;]
+iex&gt; opts = [name: :webscrapper, urls: urls]
+iex&gt; {:ok, spider} = GenSpider.start_link(StackOverflowSpider, [], opts)
+iex&gt; [top_question|_] = GenSpider.export(spider)
+iex&gt; top_question.title
+&quot;Why is processing a sorted array faster than an unsorted array?&quot;</code></pre>
 <p>We start our <code class="inline">WebScrapper</code> by calling <a href="#start_link/3"><code class="inline">start_link/3</code></a>, passing the
 module with the spider implementation and its initial argument (a
 list representing the selectors to follow and grab). We also pass
@@ -135,7 +136,7 @@ you want to customize. The callbacks are:</p>
 <ul>
 <li><code class="inline">{:ok, state}</code>
 </li>
-<li><code class="inline">{:ok, state, timeout}</code>
+<li><code class="inline">{:ok, state, delay}</code>
 </li>
 <li><code class="inline">:ignore</code>
 </li>
@@ -147,22 +148,11 @@ you want to customize. The callbacks are:</p>
 a URL successfully with a HTML in <code class="inline">response</code>.</p>
 <p>It must return:</p>
 <ul>
-<li><code class="inline">{:ok, new_state}</code>
+<li><code class="inline">{:ok, result, new_state}</code>
 </li>
 <li><code class="inline">{:ignore, new_state}</code>
 </li>
 <li><code class="inline">{:stop, reason, new_state}</code>
-</li>
-</ul>
-</li>
-<li><p><code class="inline">handle_export(type, state)</code> - invoked to handle <code class="inline">export</code> call.</p>
-<p>It must return:</p>
-<ul>
-<li><code class="inline">{:ok, data, new_state}</code>
-</li>
-<li><code class="inline">{:stop, reason, new_state}</code>
-</li>
-<li><code class="inline">{:stop, reason, data, new_state}</code>
 </li>
 </ul>
 </li>
@@ -186,16 +176,15 @@ and friends to directly start and communicate with the spider, most
 of the time we don’t call the <code class="inline">GenSpider</code> functions directly.
 Instead, we wrap the calls in new functions representing the public
 API of the spider.</p>
-<p>Here is a better implementation of our WebScrapper module:</p>
-<pre><code class="elixir">defmodule WebScrapper do
+<p>Here is a better implementation of our StackOverflowSpider module:</p>
+<pre><code class="elixir">defmodule StackOverflowSpider do
   use GenSpider
 
   # Client
   def start_link(sitemap) do
-    opts =  name: :webscrapper,
-        urls: [sitemap[&quot;siteUrl&quot;]], 
-        interval: 3600
-    GenSpider.start_link(__MODULE__, sitemap, opts)
+    urls = [&quot;http://stackoverflow.com/questions?sort=votes&quot;]
+    opts =  [name: :stackoverflow, urls: urls, interval: 3600]
+    GenSpider.start_link(__MODULE__, [], opts)
   end
 
   def json(pid) do
@@ -204,23 +193,27 @@ API of the spider.</p>
 
   # Server (callbacks)
 
-  def init(%{&quot;selectors&quot;=&gt; selectors}) do
-    %{&quot;selectors&quot; =&gt; selectors, &quot;data&quot; =&gt; []}
-  end
-
-  def parse(response, %{&quot;selectors&quot; =&gt; selectors}) do
-     # Wrap the HTML with a Css selector engine.
-    engine = GenSpider.CssSelector(response)
-    Enum.map(selectors, fn(selector) -&gt;
-      selector
-      |&gt;  engine.select()
-      |&gt; engine.extract()
+  def parse(response, state) do
+    result = response.body
+    |&gt; select(&quot;.question-summary h3 a&quot;)
+    |&gt; extract(&quot;href&quot;)
+    |&gt; Enum.map(fn(href) -&gt;
+      GenSpider.Response.url_join(response, href)
+      |&gt; GenSpider.request(&amp;parse_question/1)
+      |&gt; GenSpider.await
     end)
+    {:ok, result, state}
   end
 
-  def handle_export(:json, state) do
-    # Call the default implementation from GenSpider
-    super(:json, state)
+  defp parse_question({:ok, response}) do
+    html = response.body
+    [title] = html |&gt; select(&quot;h1 a&quot;) |&gt; extract()
+    question = html |&gt; select(&quot;.question&quot;)
+    [body] = question |&gt; select(&quot;.post-text&quot;) |&gt; extract
+    [votes] = question |&gt; select(&quot;.vote-count-post&quot;) |&gt; extract
+    tags = question |&gt; select(&quot;.post-tag&quot;) |&gt; extract
+
+    %{title: title, body: body, votes: votes, tags: tags}
   end
 end</code></pre>
 <p>In practice, it is common to have both server and client functions in
@@ -305,10 +298,43 @@ growing complex, you may want to have them in different modules.</p>
     </h2>
     <div class="summary-row">
   <div class="summary-signature">
-    <a href="#export/2">export(spider, format)</a>
+    <a href="#await/1">await(request)</a>
+  </div>
+  
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="#export/3">export(spider, format \\ nil, override \\ false)</a>
   </div>
   
     <div class="summary-synopsis"><p>Exports the stored data with specific format</p>
+</div>
+  
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="#handle_call/3">handle_call(msg, from, state)</a>
+  </div>
+  
+    <div class="summary-synopsis"><p>Called to export the data in a specific format</p>
+</div>
+  
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="#handle_info/2">handle_info(arg1, state)</a>
+  </div>
+  
+    <div class="summary-synopsis"><p>Called when a request is completed</p>
+</div>
+  
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="#request/2">request(url, callback)</a>
+  </div>
+  
+    <div class="summary-synopsis"><p>Makes an asynchronous request to a URL with a callback</p>
 </div>
   
 </div>
@@ -352,7 +378,7 @@ See <a href="#start_link/3"><code class="inline">start_link/3</code></a> for mor
           </h1>
           <div class="types-list">
             <div id="t:format/0" class="type-detail">
-  <pre><code class="elixir"><a href="#t:format/0">format</a> :: :json | :csv | :xml</code></pre>
+  <pre><code class="elixir"><a href="#t:format/0">format</a> :: :html | :json | :csv | :xml</code></pre>
   
     <div class="typespec-doc"><p>Exportable formats</p>
 </div>
@@ -406,14 +432,31 @@ See <a href="#start_link/3"><code class="inline">start_link/3</code></a> for mor
             </a>
             Functions
           </h1>
-          <div class="detail" id="export/2">
+          <div class="detail" id="await/1">
   <div class="detail-header">
-    <a href="#export/2" class="detail-link" title="Link to this function">
+    <a href="#await/1" class="detail-link" title="Link to this function">
       <i class="icon-link"></i>
     </a>
-    <span class="signature">export(spider, format)</span>
+    <span class="signature">await(request)</span>
       
-      <a href="https://bitbucket.org/inhuman/scrapex/src/v0.0.1/lib/scrapex/gen_spider.ex#cl-307" class="view-source" rel="help" title="View Source">
+      <a href="https://bitbucket.org/inhuman/scrapex/src/v0.1.0/lib/scrapex/gen_spider.ex#cl-369" class="view-source" rel="help" title="View Source">
+       <i class="icon-code"></i>
+     </a>
+    
+  </div>
+  
+  <section class="docstring">
+    
+  </section>
+</div>
+<div class="detail" id="export/3">
+  <div class="detail-header">
+    <a href="#export/3" class="detail-link" title="Link to this function">
+      <i class="icon-link"></i>
+    </a>
+    <span class="signature">export(spider, format \\ nil, override \\ false)</span>
+      
+      <a href="https://bitbucket.org/inhuman/scrapex/src/v0.1.0/lib/scrapex/gen_spider.ex#cl-352" class="view-source" rel="help" title="View Source">
        <i class="icon-code"></i>
      </a>
     
@@ -423,13 +466,88 @@ See <a href="#start_link/3"><code class="inline">start_link/3</code></a> for mor
       <h4 class="specs-title">Specs</h4>
       <div class="specs-list">
         
-          <pre><code class="elixir">export(<a href="#t:spider/0">spider</a>, <a href="#t:format/0">format</a>) :: any</code></pre>
+          <pre><code class="elixir">export(<a href="#t:spider/0">spider</a>, <a href="#t:format/0">format</a>, boolean) :: any</code></pre>
         
       </div>
     </div>
   
   <section class="docstring">
-    <p>Exports the stored data with specific format</p>
+    <p>Exports the stored data with specific format.</p>
+<p>This call will block until all data received.</p>
+<p>This is called in the following situations:</p>
+<ul>
+<li>Right after spider is started.
+</li>
+<li>In the middle of a crawl.
+</li>
+<li>In between the crawl interval.
+</li>
+</ul>
+<p>For the first two situations, the spider will manually awaits the
+requests instead of handle the response message in <a href="#handle_info/2"><code class="inline">handle_info/2</code></a>.</p>
+<p>If one of the <code class="inline">parse/2</code> callbacks wants to stop the spider, this
+function will still return partial data if any, and then stops the
+spider.</p>
+<p>If the third argument is true, the spider will clear any timer in
+place and immediately crawl for new data.</p>
+
+  </section>
+</div>
+<div class="detail" id="handle_call/3">
+  <div class="detail-header">
+    <a href="#handle_call/3" class="detail-link" title="Link to this function">
+      <i class="icon-link"></i>
+    </a>
+    <span class="signature">handle_call(msg, from, state)</span>
+      
+      <a href="https://bitbucket.org/inhuman/scrapex/src/v0.1.0/lib/scrapex/gen_spider.ex#cl-415" class="view-source" rel="help" title="View Source">
+       <i class="icon-code"></i>
+     </a>
+    
+  </div>
+  
+  <section class="docstring">
+    <p>Called to export the data in a specific format.</p>
+
+  </section>
+</div>
+<div class="detail" id="handle_info/2">
+  <div class="detail-header">
+    <a href="#handle_info/2" class="detail-link" title="Link to this function">
+      <i class="icon-link"></i>
+    </a>
+    <span class="signature">handle_info(arg1, state)</span>
+      
+      <a href="https://bitbucket.org/inhuman/scrapex/src/v0.1.0/lib/scrapex/gen_spider.ex#cl-485" class="view-source" rel="help" title="View Source">
+       <i class="icon-code"></i>
+     </a>
+    
+  </div>
+  
+  <section class="docstring">
+    <p>Called when a request is completed.</p>
+<p>When a request is completed, i.e. receives the response, this process
+receives a message with the result. We then call the <code class="inline">parse</code> function
+of the callback module.</p>
+<p>If this is for the last request, it sets a new timer if needed.</p>
+
+  </section>
+</div>
+<div class="detail" id="request/2">
+  <div class="detail-header">
+    <a href="#request/2" class="detail-link" title="Link to this function">
+      <i class="icon-link"></i>
+    </a>
+    <span class="signature">request(url, callback)</span>
+      
+      <a href="https://bitbucket.org/inhuman/scrapex/src/v0.1.0/lib/scrapex/gen_spider.ex#cl-361" class="view-source" rel="help" title="View Source">
+       <i class="icon-code"></i>
+     </a>
+    
+  </div>
+  
+  <section class="docstring">
+    <p>Makes an asynchronous request to a URL with a callback.</p>
 
   </section>
 </div>
@@ -440,7 +558,7 @@ See <a href="#start_link/3"><code class="inline">start_link/3</code></a> for mor
     </a>
     <span class="signature">start(module, args, options \\ [])</span>
       
-      <a href="https://bitbucket.org/inhuman/scrapex/src/v0.0.1/lib/scrapex/gen_spider.ex#cl-299" class="view-source" rel="help" title="View Source">
+      <a href="https://bitbucket.org/inhuman/scrapex/src/v0.1.0/lib/scrapex/gen_spider.ex#cl-308" class="view-source" rel="help" title="View Source">
        <i class="icon-code"></i>
      </a>
     
@@ -468,7 +586,7 @@ See <a href="#start_link/3"><code class="inline">start_link/3</code></a> for mor
     </a>
     <span class="signature">start_link(module, args, options \\ [])</span>
       
-      <a href="https://bitbucket.org/inhuman/scrapex/src/v0.0.1/lib/scrapex/gen_spider.ex#cl-290" class="view-source" rel="help" title="View Source">
+      <a href="https://bitbucket.org/inhuman/scrapex/src/v0.1.0/lib/scrapex/gen_spider.ex#cl-297" class="view-source" rel="help" title="View Source">
        <i class="icon-code"></i>
      </a>
     
