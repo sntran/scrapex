@@ -43,7 +43,8 @@ defmodule Scrapex.Selector do
   def extract(%Selector{tree: tree}, "text") do
     Enum.map(tree, fn({_, _, children}) -> 
       extract_text(children, "")
-      |> String.strip
+      |> String.split
+      |> Enum.join(" ")
     end)
   end
   def extract(%Selector{tree: tree}, attr) do

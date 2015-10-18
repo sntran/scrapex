@@ -41,4 +41,12 @@ defmodule Scrapex.SelectorTest do
 
     assert link_texts === ["Computers", "Phones"]
   end
+
+  test "trip all Unicode whitespaces", context do
+    [p] = context.body
+    |> select(".jumbotron p")
+    |> extract()
+
+    assert p === "Welcome to WebScraper e-commerce site. You can use this site for training to learn how to use the Web Scraper. Items listed here are not for sale."
+  end
 end
