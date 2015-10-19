@@ -348,4 +348,16 @@ defmodule Scrapex.GenSpiderTest do
 
     assert data === actual
   end
+
+  test "should follow redirect" do
+    url = "http://localhost:9090/e-commerce/static"
+    opts = [urls: [url]]
+    tester = self
+    callback = &(send(tester, {:test_result, &1}))
+
+    {:ok, spider} = GenSpider.start(MapSpider, callback, opts)
+    [%{"body" => data}] = GenSpider.export(spider)
+
+    assert data === HTTPoison.get!(url <> "/index.html").body
+  end
 end

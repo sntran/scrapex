@@ -555,7 +555,8 @@ defmodule Scrapex.GenSpider do
   end
 
   defp do_request(url) do
-    case HTTPoison.get(url) do
+    hackney = [follow_redirect: true]
+    case HTTPoison.get(url, [], [ hackney: hackney ]) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
         {:ok, %Response{url: url, body: body}}
       {:ok, %HTTPoison.Response{status_code: 404}} ->
