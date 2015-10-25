@@ -226,15 +226,15 @@ defmodule Scrapex.Spider.WebScraper do
     start_link(%{sitemap | "startUrl" => [url]})
   end
   def start_link(sitemap = %{"startUrl" => urls}) when is_list(urls) do
-    opts =  [name: __MODULE__,
+    opts =  [
         urls: urls, 
         interval: 3600]
 
     GenSpider.start_link(__MODULE__, sitemap, opts)
   end
 
-  def export(format \\ nil) do
-    GenSpider.export(__MODULE__, format)
+  def export(spider, format \\ nil) do
+    GenSpider.export(spider, format)
   end
   
   # Server (callbacks)
@@ -247,16 +247,26 @@ defmodule Scrapex.Spider.WebScraper do
     result = rules
     |> Enum.map(fn(rule) -> 
       key = rule["id"]
-      response.body
+      multiple? = rule["multiple"]
+
+      values = response.body
       |> select(rule["selector"])
       |> extract
-      |> Enum.map(&({key, &1}))
+
+      (if multiple?, do: values, else: Enum.take(values, 1))
+      |>Enum.map(&({key, &1}))
     end)
-    |> Enum.reduce([ [] ], fn(kvpairs, items) ->
-      for kvpair <- kvpairs, item <- items, do: [kvpair | item]
-    end)
+    |> Enum.reduce([ ], &combine/2)
     |> Enum.map(&Enum.into(&1, %{}))
 
     {:ok, result, rules}
+  end
+
+  defp combine([], items), do: items
+  defp combine(kvpairs, []) do
+    for kvpair <- kvpairs, do: [kvpair]
+  end
+  defp combine(kvpairs, items) do
+    for kvpair <- kvpairs, item <- items, do: [kvpair | item]
   end
 end
