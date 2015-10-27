@@ -215,6 +215,7 @@ defmodule Scrapex.Spider.WebScraper do
   @type property :: { key, value }
   @type key :: binary
   @type value :: binary
+  @type rule :: %{key => value}
 
   alias Scrapex.GenSpider
   alias GenSpider.Response
@@ -244,29 +245,76 @@ defmodule Scrapex.Spider.WebScraper do
   end
 
   def parse(response, rules) do
-    result = rules
-    |> Enum.map(fn(rule) -> 
+    by_parent = group_by_parents(rules)
+    results
+    =  parse_level(response, "_root", by_parent)
+    # @return: [ item ]
+    |> Enum.map(&Enum.into(&1, %{}))
+
+    {:ok, results, rules}
+  end
+
+  @spec parse_level(binary, binary, %{key => [rule]}) :: [item]
+  defp parse_level(response, parent, rule_groups) do
+    body = response.body
+    rules = (rule_groups[parent] || [])
+
+    rules
+    |> Enum.map(fn(rule) ->
       key = rule["id"]
       multiple? = rule["multiple"]
 
-      values = response.body
-      |> select(rule["selector"])
-      |> extract
+      selectors = select(response.body, rule["selector"])
+      selectors = if multiple?, do: selectors, else: Enum.take(selectors, 1)
+      selectors
+      |> Enum.map(fn(selector) ->
+        [value] = extract(selector, "text")
+        result = [[{key, value}]]
+        # For each key-value pair, return into a list, with
+        # new key-value pair(s) if rule's selector is a link.
+        case rule["type"] do
+          "SelectorText" ->
+            result
+          "SelectorLink" ->
+            [href] = extract(selector, "href")
+            url = GenSpider.Response.url_join(response, href)
 
-      (if multiple?, do: values, else: Enum.take(values, 1))
-      |>Enum.map(&({key, &1}))
+            request = GenSpider.request(url, fn({:ok, response}) ->
+              # Get sub nodes as a tuple list.
+              parse_level(response, rule["id"], rule_groups)
+            end)
+            subvalues = GenSpider.await(request)
+            # @return [ item ]
+            combine(result, subvalues)
+        end
+      end)
+      # @return [ item ]
+      |> Enum.concat
     end)
-    |> Enum.reduce([ ], &combine/2)
-    |> Enum.map(&Enum.into(&1, %{}))
-
-    {:ok, result, rules}
+    |> Enum.reduce(&combine/2)
   end
 
-  defp combine([], items), do: items
-  defp combine(kvpairs, []) do
-    for kvpair <- kvpairs, do: [kvpair]
+  @spec combine([item], [item]) :: [item]
+  defp combine([], right), do: right
+  defp combine(left, []), do: left
+  defp combine(left, right) do
+    for litem <- left, ritem <- right, do: Enum.concat(litem, ritem)
   end
-  defp combine(kvpairs, items) do
-    for kvpair <- kvpairs, item <- items, do: [kvpair | item]
+  
+  # def parse(response, selectors) do
+  #   by_parent = group_by_parents(selectors)
+  #   kv_pairs = parse_level(response, "_root", by_parent)
+  #   result = Enum.into(kv_pairs, %{})
+
+  #   {:ok, [result], selectors}
+  # end
+
+  @spec group_by_parents([rule], binary) :: %{key => [rule]}
+  defp group_by_parents(selectors, key \\ "parentSelectors") do
+    Enum.reduce(selectors, %{}, fn(selector, categories) ->
+      Enum.reduce(selector[key], categories, fn(parent, categories) ->
+        Dict.update(categories, parent, [selector], &[selector|&1])
+      end)
+    end)
   end
 end

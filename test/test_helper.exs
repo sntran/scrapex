@@ -17,3 +17,9 @@ System.at_exit fn(_exit_status) ->
 end
 
 ExUnit.start()
+
+defmodule ScrapexAsserter do
+  def array_equals(left, right) do
+    Enum.all?(left, &Enum.member?(right, &1))
+  end
+end

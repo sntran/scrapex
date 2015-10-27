@@ -281,6 +281,91 @@ defmodule Scrapex.Spider.WebScraperTest do
       "Page Title" => "E-commerce training site", 
       "Navigation" => "Donate"
     }]
+    assert ScrapexAsserter.array_equals(data, expected)
+  end
+
+  test "follow nodes under _root first" do
+    selectors = [%{
+      "parentSelectors" => ["_root"],
+      "type" => "SelectorText",
+      "multiple" => false,
+      "id" => "Page Title",
+      "selector" => ".jumbotron h1",
+      "delay" => ""
+    }, %{
+      "parentSelectors" => ["Category"],
+      "type" => "SelectorText",
+      "multiple" => false,
+      "id" => "SubCategory",
+      "selector" => "a.subcategory-link",
+      "delay" => ""
+    }, %{
+      "parentSelectors" => ["_root"],
+      "type" => "SelectorLink",
+      "multiple" => false,
+      "id" => "Category",
+      "selector" => "a.category-link",
+      "delay" => ""
+    }]
+    sitemap = %{"startUrl" => @url, "selectors" => selectors}
+
+    {:ok, spider} = WebScraper.start_link(sitemap)
+    [data] = WebScraper.export(spider)
+
+    expected = %{
+      "Category" => "Computers",
+      "Page Title" => "E-commerce training site",
+      "SubCategory" => "Laptops"
+    }
+    assert data === expected
+  end
+
+  test "whether to retrieve multiple items from selector" do
+    selectors = [%{
+      "parentSelectors" => ["_root"],
+      "type" => "SelectorText",
+      "multiple" => false,
+      "id" => "Page Title",
+      "selector" => ".jumbotron h1",
+      "delay" => ""
+    }, %{
+      "parentSelectors" => ["Category"],
+      "type" => "SelectorText",
+      "multiple" => true,
+      "id" => "SubCategory",
+      "selector" => "a.subcategory-link",
+      "delay" => ""
+    }, %{
+      "parentSelectors" => ["_root"],
+      "type" => "SelectorLink",
+      "multiple" => true,
+      "id" => "Category",
+      "selector" => "a.category-link",
+      "delay" => ""
+    }]
+    sitemap = %{"startUrl" => @url, "selectors" => selectors}
+
+    {:ok, spider} = WebScraper.start_link(sitemap)
+    data = WebScraper.export(spider)
+
+    # There are 2 categories, and 3 subcategories total, so there
+    # must be 3 results.
+
+    assert length(data) === 3
+    expected = [%{
+      "Category" => "Computers",
+      "Page Title" => "E-commerce training site",
+      "SubCategory" => "Laptops"
+    }, %{
+      "Category" => "Computers",
+      "Page Title" => "E-commerce training site",
+      "SubCategory" => "Tablets"
+    }, %{
+      "Category" => "Phones",
+      "Page Title" => "E-commerce training site",
+      "SubCategory" => "Touch"
+    }]
+
     assert data === expected
   end
 end

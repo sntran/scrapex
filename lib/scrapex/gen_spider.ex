@@ -366,6 +366,7 @@ defmodule Scrapex.GenSpider do
     end)
   end
 
+  @spec await(Request.t) :: any
   def await(request), do: Request.await(request)
 
   # GenServer callbacks
