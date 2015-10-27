@@ -49,4 +49,33 @@ defmodule Scrapex.SelectorTest do
 
     assert p === "Welcome to WebScraper e-commerce site. You can use this site for training to learn how to use the Web Scraper. Items listed here are not for sale."
   end
+
+  # TESTS FOR ENUMERABLE
+
+  test "can be enumerable", context do
+    selectors = select(context.body, "a.category-link")
+    # Of course you can enumarate extracted values
+    categories = extract(selectors)
+    |> Enum.map(&(&1))
+
+    assert categories == Enum.map(selectors, fn(selector) ->
+      [value] = extract(selector)
+      value
+    end)
+  end
+
+  test "a single selector can still be enumerable", context do
+    selectors = select(context.body, "a.category-link")
+    # Of course you can enumarate extracted values
+    categories = extract(selectors)
+    |> Enum.map(&(&1))
+
+    selectors = select(context.body, "h1")
+    expected = ["E-commerce training site"]
+
+    assert expected == Enum.map(selectors, fn(selector) ->
+      [value] = extract(selector)
+      value
+    end)
+  end
 end
