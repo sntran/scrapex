@@ -246,6 +246,7 @@ defmodule Scrapex.Spider.WebScraper do
 
   def parse(response, rules) do
     by_parent = group_by_parents(rules)
+
     results
     =  parse_level(response, "_root", by_parent)
     # @return: [ item ]
@@ -264,7 +265,7 @@ defmodule Scrapex.Spider.WebScraper do
       key = rule["id"]
       multiple? = rule["multiple"]
 
-      selectors = select(response.body, rule["selector"])
+      selectors = select(body, rule["selector"])
       selectors = if multiple?, do: selectors, else: Enum.take(selectors, 1)
       selectors
       |> Enum.map(fn(selector) ->
@@ -272,10 +273,13 @@ defmodule Scrapex.Spider.WebScraper do
         result = [[{key, value}]]
         # For each key-value pair, return into a list, with
         # new key-value pair(s) if rule's selector is a link.
-        case rule["type"] do
-          "SelectorText" ->
+        case {rule["type"], rule_groups[key]} do
+          {"SelectorText", _} ->
             result
-          "SelectorLink" ->
+          {"SelectorLink", nil} ->
+            # Link with no child rule just returns the text value
+            result
+          {"SelectorLink", _} ->
             [href] = extract(selector, "href")
             url = GenSpider.Response.url_join(response, href)
 
@@ -286,6 +290,14 @@ defmodule Scrapex.Spider.WebScraper do
             subvalues = GenSpider.await(request)
             # @return [ item ]
             combine(result, subvalues)
+          {"SelectorElement", nil} ->
+            # Don't return SelectorElement in result
+            []
+          {"SelectorElement", _} ->
+            # Only use the results scraped from children rules.
+            parse_level(%{body: selector}, key, rule_groups)
+          _ ->
+            []
         end
       end)
       # @return [ item ]
@@ -300,20 +312,12 @@ defmodule Scrapex.Spider.WebScraper do
   defp combine(left, right) do
     for litem <- left, ritem <- right, do: Enum.concat(litem, ritem)
   end
-  
-  # def parse(response, selectors) do
-  #   by_parent = group_by_parents(selectors)
-  #   kv_pairs = parse_level(response, "_root", by_parent)
-  #   result = Enum.into(kv_pairs, %{})
-
-  #   {:ok, [result], selectors}
-  # end
 
   @spec group_by_parents([rule], binary) :: %{key => [rule]}
   defp group_by_parents(selectors, key \\ "parentSelectors") do
-    Enum.reduce(selectors, %{}, fn(selector, categories) ->
-      Enum.reduce(selector[key], categories, fn(parent, categories) ->
-        Dict.update(categories, parent, [selector], &[selector|&1])
+    Enum.reduce(selectors, %{}, fn(selector, groups) ->
+      Enum.reduce(selector[key], groups, fn(parent, groups) ->
+        Dict.update(groups, parent, [selector], &[selector|&1])
       end)
     end)
   end
