@@ -29,4 +29,8 @@ defmodule Scrapex.GenSpider.Response do
   def url_join(%Response{url: url}, path) do
     "#{url}/#{path}"
   end
+
+  def url_join(_, "http" <> path) do
+    "http#{path}"
+  end
 end

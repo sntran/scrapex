@@ -40,6 +40,7 @@ defmodule Scrapex.Selector do
   """
   @spec extract(t, name) :: [binary]
   def extract(selector), do: extract(selector, "text")
+  def extract(selector, ""), do: extract(selector, "text")
   def extract(%Selector{tree: tree}, "text") do
     Enum.map(tree, fn({_, _, children}) -> 
       extract_text(children, "")

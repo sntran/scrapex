@@ -43,7 +43,7 @@ defmodule Scrapex.Mixfile do
   defp deps do
     [
       {:httpoison, "~> 0.7"},
-      {:floki, "~> 0.5"},
+      {:floki, "~> 0.7.0"},
       {:poison, "~> 1.4.0"},
       {:csv, "~> 1.2.1"},
 

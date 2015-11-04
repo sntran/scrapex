@@ -351,7 +351,7 @@ defmodule Scrapex.GenSpider do
   @spec export(spider, format, boolean) :: any
   def export(spider, format \\ nil, override \\ false) do
     # Await for all the data to be collected first.
-    GenServer.call(spider, :await, 30000)
+    GenServer.call(spider, :await, :infinity)
     GenServer.call(spider, {:export, format, override})
   end
 
@@ -556,6 +556,7 @@ defmodule Scrapex.GenSpider do
   end
 
   defp do_request(url) do
+    Logger.debug("Do request for #{url}")
     hackney = [follow_redirect: true]
     case HTTPoison.get(url, [], [ hackney: hackney ]) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->

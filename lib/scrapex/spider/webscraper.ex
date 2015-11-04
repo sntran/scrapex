@@ -222,6 +222,8 @@ defmodule Scrapex.Spider.WebScraper do
   import Scrapex.Selector
   use GenSpider
 
+  require Logger
+
   # Client
   def start_link(sitemap = %{"startUrl" => url}) when is_binary(url) do
     start_link(%{sitemap | "startUrl" => [url]})
@@ -261,45 +263,66 @@ defmodule Scrapex.Spider.WebScraper do
     rules = (rule_groups[parent] || [])
 
     rules
-    |> Enum.map(fn(rule) ->
-      key = rule["id"]
-      multiple? = rule["multiple"]
+    |> Enum.map(fn
+      (rule = %{"type" => "SelectorGroup"}) ->
+        # For SelectorGroup, we collect all values into a list.
+        # Note: This is different from WebScraper.IO extension.
+        key = rule["id"]
+        attribute = rule["extractAttribute"] || "text"
+        values = select(body, rule["selector"]) |> extract(attribute)
+        [[{key, values}]]
+      (rule) ->
+        key = rule["id"]
+        multiple? = rule["multiple"]
+        selectors = select(body, rule["selector"])
+        selectors = if multiple?, do: selectors, else: Enum.take(selectors, 1)
+        Logger.debug("Selecting #{rule["selector"]} into:")
+        selectors
+        |> Enum.map(fn(selector) ->
+          [value] = extract(selector, "text")
+          result = [[{key, value}]]
 
-      selectors = select(body, rule["selector"])
-      selectors = if multiple?, do: selectors, else: Enum.take(selectors, 1)
-      selectors
-      |> Enum.map(fn(selector) ->
-        [value] = extract(selector, "text")
-        result = [[{key, value}]]
-        # For each key-value pair, return into a list, with
-        # new key-value pair(s) if rule's selector is a link.
-        case {rule["type"], rule_groups[key]} do
-          {"SelectorText", _} ->
-            result
-          {"SelectorLink", nil} ->
-            # Link with no child rule just returns the text value
-            result
-          {"SelectorLink", _} ->
-            [href] = extract(selector, "href")
-            url = GenSpider.Response.url_join(response, href)
+          Logger.debug("Parse response with #{rule["type"]}: #{rule["selector"]}")
+          # For each key-value pair, return into a list, with
+          # new key-value pair(s) if rule's selector is a link.
+          case {rule["type"], rule_groups[key]} do
+            {"SelectorText", _} ->
+              regex = rule["regex"]
+              case Regex.compile(rule["regex"]) do
+                {:error, reason} -> result
+                {:ok, ~r//} -> result
+                {:ok, regex} ->
+                  [value|_] = Regex.run(regex, value)
+                  [[{key, value}]]
+              end
+            {"SelectorLink", nil} ->
+              # Link with no child rule just returns the text value
+              result
+            {"SelectorLink", _} ->
+              [href] = extract(selector, "href")
+              url = GenSpider.Response.url_join(response, href)
+              result = [[{key, value}, {key <> "-href", url}]]
 
-            request = GenSpider.request(url, fn({:ok, response}) ->
-              # Get sub nodes as a tuple list.
-              parse_level(response, rule["id"], rule_groups)
-            end)
-            subvalues = GenSpider.await(request)
-            # @return [ item ]
-            combine(result, subvalues)
-          {"SelectorElement", nil} ->
-            # Don't return SelectorElement in result
-            []
-          {"SelectorElement", _} ->
-            # Only use the results scraped from children rules.
-            parse_level(%{body: selector}, key, rule_groups)
-          _ ->
-            []
-        end
-      end)
+              request = GenSpider.request(url, fn({:ok, response}) ->
+                # Get sub nodes as a tuple list.
+                parse_level(response, rule["id"], rule_groups)
+              end)
+              subvalues = GenSpider.await(request)
+              # @return [ item ]
+              combine(result, subvalues)
+            {"SelectorElement", nil} ->
+              # Don't return SelectorElement in result
+              []
+            {"SelectorElement", _} ->
+              # Only use the results scraped from children rules.
+              parse_level(%{body: selector}, key, rule_groups)
+            {"SelectorElementAttribute", _} ->
+              [value] = extract(selector, rule["extractAttribute"])
+              [[{key, value}]]
+            _ ->
+              result
+          end
+        end)
       # @return [ item ]
       |> Enum.concat
     end)
