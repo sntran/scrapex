@@ -394,7 +394,9 @@ defmodule Scrapex.GenSpider do
     GenServer.call(spider, {:export, format, override})
   end
 
-  defdelegate request(url, callback), to: Request, as: :async
+  def request(url, callback, from \\ self) do
+    Request.async(url, callback, from)
+  end
   defdelegate await(request), to: Request
 
   # GenServer callbacks
@@ -544,17 +546,16 @@ defmodule Scrapex.GenSpider do
 
   If this is for the last request, it sets a new timer if needed.
   """
-  # def handle_info({ref, {:ok, %Request{}=req}}, spider) do
-  #   # BUG: Spider can't await for request that was spawned in other req.
-  #   data = Request.await(req)
-  #   handle_info({ref, {:ok, data}}, spider)
-  # end
+  def handle_info({ref, {:ok, %Request{}=req}}, spider) do
+    data = Request.await(req)
+    handle_info({ref, {:ok, data}}, spider)
+  end
 
-  # def handle_info({ref, {:ok, requests = [%Request{} | _]}}, spider) do
-  #   data = Stream.map(requests, &Request.await(&1))
-  #   |> Enum.concat
-  #   handle_info({ref, {:ok, data}}, spider)
-  # end
+  def handle_info({ref, {:ok, requests = [%Request{} | _]}}, spider) do
+    data = Stream.map(requests, &Request.await(&1))
+    |> Enum.concat
+    handle_info({ref, {:ok, data}}, spider)
+  end
 
   def handle_info({ref, {:ok, data}}, spider) do
     # Remove this request from the list.

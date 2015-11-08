@@ -43,20 +43,13 @@ defmodule Scrapex.GenSpider.Request do
   i.e., in the format `{ref, msg}`, where `ref` is the monitoring ref
   held by the request, and `msg` is the return value of the callback.
   """
-  @spec async(url, fun) :: t
-  def async(url, callback) do
-    task = Task.async(fn ->
-      case do_request(url) do
-        # HTTP Request succeeded, return whatever the callback returns.
-        {:ok, response} ->
-          response |> callback.()
-        # Forward the HTTP error to the `handle_info`
-        {:error, reason} -> 
-          {:error, reason}
-      end
-    end)
-
-    %Request{url: url, pid: task.pid, ref: task.ref}
+  @spec async(url, fun, pid) :: t
+  def async(url, callback, from \\ self) when is_pid(from) do
+    mfa = {:erlang, :apply, [&request/2, [url, callback]]}
+    pid = :proc_lib.spawn_link(Task.Supervised, :async, [from, get_info(from), mfa])
+    ref = Process.monitor(pid)
+    send(pid, {from, ref})
+    %Request{url: url, pid: pid, ref: ref}
   end
 
   @doc """
@@ -69,6 +62,25 @@ defmodule Scrapex.GenSpider.Request do
   @spec await(t, timeout) :: term
   def await(%Request{pid: pid, ref: ref}, timeout \\ 5000) do
     Task.await(%Task{pid: pid, ref: ref}, timeout)
+  end
+
+  defp get_info(pid) do
+    {node(),
+     case Process.info(pid, :registered_name) do
+       {:registered_name, []} -> pid
+       {:registered_name, name} -> name
+     end}
+  end
+
+  defp request(url, callback) do
+    case do_request(url) do
+      # HTTP Request succeeded, return whatever the callback returns.
+      {:ok, response} ->
+        response |> callback.()
+      # Forward the HTTP error to the `handle_info`
+      {:error, reason} -> 
+        {:error, reason}
+    end
   end
 
   defp do_request(url) do
