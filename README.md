@@ -45,7 +45,7 @@ Written in Elixir and runs on Linux, Windows, Mac, BSD, and embedded devices.
       end
     end
     urls = ["http://stackoverflow.com/questions?sort=votes"]
-    opts = [name: :webscrapper, urls: urls]
+    opts = [name: :stackoverflow_spider, urls: urls]
     {:ok, spider} = GenSpider.start_link(StackOverflowSpider, [], opts)
     questions = GenSpider.export(spider)
     #=> "[{} | _]"
@@ -58,5 +58,10 @@ Written in Elixir and runs on Linux, Windows, Mac, BSD, and embedded devices.
 - [x] CSS selector
 - [ ] XPath selector
 - [x] Yield for requests in `parse/2`
+- [x] Follow redirects
+- [ ] Set custom request headers
+- [ ] Respect robots.txt
+- [ ] Resolve DNS once only
+- [ ] Domain blacklist
 - [ ] Parse response chunk by chunk
 - [ ] CLI

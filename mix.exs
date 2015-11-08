@@ -1,7 +1,7 @@
 defmodule Scrapex.Mixfile do
   use Mix.Project
 
-  @version "0.1.6"
+  @version "0.3.0"
 
   def project do
     [app: :scrapex,

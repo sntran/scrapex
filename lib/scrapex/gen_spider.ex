@@ -1,7 +1,6 @@
 defmodule Scrapex.GenSpider do
   alias Scrapex.GenSpider
-  alias Task, as: Request
-  alias GenSpider.Response
+  alias GenSpider.Request
 
   require Logger
   @moduledoc ~S"""
@@ -25,7 +24,7 @@ defmodule Scrapex.GenSpider do
       ...>   use GenSpider
       ...>   import Scrapex.Selector
       ...>   
-      ...>   def parse(response, state) do
+      ...>   def parse(response) do
       ...>     result = response.body
       ...>     |> select(".question-summary h3 a")
       ...>     |> extract("href")
@@ -34,10 +33,10 @@ defmodule Scrapex.GenSpider do
       ...>       |> GenSpider.request(&parse_question/1)
       ...>       |> GenSpider.await
       ...>     end)
-      ...>     {:ok, result, state}
+      ...>     {:ok, result}
       ...>   end
       ...> 
-      ...>   defp parse_question({:ok, response}) do
+      ...>   defp parse_question(response) do
       ...>     html = response.body
       ...>     [title] = html |> select("h1 a") |> extract()
       ...>     question = html |> select(".question")
@@ -81,13 +80,31 @@ defmodule Scrapex.GenSpider do
       -  `:ignore`
       -  `{:stop, reason}`
 
-    * `parse(response, state)` - invoked after the spider has requested
+    * `start_requests(state)` - called by Scrapy when the spider is 
+      opened for scraping when no particular URLs are specified.  If 
+      particular URLs are specified, the `make_requests_from_url/1`
+      is used instead to create the Requests. This method is also 
+      called only once from Scrapex, so it’s safe to implement it as 
+      a stream.
+
+      The default implementation uses `make_requests_from_url/1` to 
+      generate Requests for each url in `options.urls`.
+
+    * `make_requests_from_url(url)` - returns a Request object (or a 
+      list of Request objects) to scrape. It is used to construct the 
+      initial requests in  `start_requests/1`, and is typically used to 
+      convert urls to requests.
+
+      Unless overridden, this method returns Requests with `parse/2 as 
+      their callback function.
+
+    * `parse(response)` - invoked after the spider has requested
       a URL successfully with a HTML in `response`.
 
       It must return:
-      -  `{:ok, result, new_state}`
-      -  `{:ignore, new_state}`
-      -  `{:stop, reason, new_state}`
+      -  `{:ok, result}`
+      -  `{:ignore, reason}`
+      -  `{:stop, reason}`
 
     * `terminate(reason, state)` - called when the server is about to
       terminate, useful for cleaning up. It must return `:ok`.
@@ -125,7 +142,7 @@ defmodule Scrapex.GenSpider do
         
         # Server (callbacks)
 
-        def parse(response, state) do
+        def parse(response) do
           result = response.body
           |> select(".question-summary h3 a")
           |> extract("href")
@@ -134,10 +151,10 @@ defmodule Scrapex.GenSpider do
             |> GenSpider.request(&parse_question/1)
             |> GenSpider.await
           end)
-          {:ok, result, state}
+          {:ok, result]}
         end
 
-        defp parse_question({:ok, response}) do
+        defp parse_question(response) do
           html = response.body
           [title] = html |> select("h1 a") |> extract()
           question = html |> select(".question")
@@ -157,7 +174,10 @@ defmodule Scrapex.GenSpider do
   @typedoc "Options used by the `start*` functions"
   @type options :: [options]
 
+  @type url :: binary
+
   @type option :: {:name, GenServer.name} |
+                  {:urls, [url]} |
                   {:timeout, timeout} |
                   {:interval, non_neg_integer}
 
@@ -167,11 +187,23 @@ defmodule Scrapex.GenSpider do
   @typedoc "The internal state of the spider"
   @type state :: any
 
+  @typedoc "The list of requests or stream for the spider to enumerate"
+  @type requests :: Request.t | [Request.t] | Stream.t
+
   @typedoc "The response from a request to a URL"
   @type response :: binary
 
   @typedoc "Exportable formats"
   @type format :: :html | :json | :csv | :xml
+
+  @type t :: %__MODULE__{module: atom, 
+                         state: any, 
+                         options: Keyword.t,
+                         data: [{url, any}],
+                         requests: requests,
+                         timer: reference}
+  defstruct module: nil, state: nil, 
+            options: [], data: [], requests: [], timer: nil
 
   # `GenSpider` is based on `GenServer`.
   use GenServer
@@ -181,13 +213,14 @@ defmodule Scrapex.GenSpider do
     {:ok, state} | {:ok, state, timeout | :hibernate} |
     :ignore | {:stop, reason :: term}
 
-  @callback parse(response, state) ::
-    {:ok, state} | {:ignore, state} |
-    {:stop, reason :: term, state}
+  @callback start_requests([url], state) ::
+    {:ok, requests, state}
 
-  @callback handle_export(format, state) ::
-    {:ok, any, state} |
-    {:stop, reason :: term, state} | {:stop, reason :: term, any, state}
+  @callback make_requests_from_url(url) :: requests
+
+  @callback parse(response) ::
+    {:ok, data :: list} | {:ignore, reason :: term} |
+    {:stop, reason :: term}
 
   @doc """
   This callback is the same as the `GenServer` equivalent and is used to change
@@ -207,29 +240,35 @@ defmodule Scrapex.GenSpider do
     quote location: :keep do
       @behaviour GenSpider
 
+      @start_urls []
+
       @doc false
       def init(args) do
         {:ok, args}
       end
 
-      @doc false
-      def parse(response, state) do
-        # We do this to trick dialyzer to not complain about non-local returns.
-        reason = {:bad_call, response}
-        case :erlang.phash2(1, 1) do
-          0 -> exit(:normal)
-          1 -> {:stop, reason, state}
-        end
+      @doc """
+      Default method to generate the first Requests to crawl.
+
+      Uses `make_requests_from_url/1` to generate Requests for each 
+      url in `start_urls`.
+      """
+      def start_requests(start_urls, state) do
+        requests = start_urls
+        |> Enum.map(&make_requests_from_url/1)
+        {:ok, requests, state}
+      end
+
+      @doc """
+      Default method to generate a Request (or a list of Requests).
+      """
+      def make_requests_from_url(url) do
+        GenSpider.request(url, &parse/1)
       end
 
       @doc false
-      def handle_export(_type, state) do
-        # We do this to trick dialyzer to not complain about non-local returns.
-        reason = :bad_call
-        case :erlang.phash2(1, 1) do
-          0 -> exit(:normal)
-          1 -> {:stop, reason, state}
-        end
+      def parse(response) do
+        {:ok, [response.body]}
       end
 
       @doc false
@@ -242,13 +281,13 @@ defmodule Scrapex.GenSpider do
         {:ok, state}
       end
 
-      defoverridable [init: 1, parse: 2, handle_export: 2,
+      defoverridable [init: 1, 
+                      start_requests: 2, 
+                      make_requests_from_url: 1,
+                      parse: 1,
                       terminate: 2, code_change: 3]
     end
   end
-
-  defstruct module: nil, state: nil, 
-            options: [], data: [], requests: [], timer: nil
 
   @doc """
   Starts a `GenSpider` process linked to the current process.
@@ -341,7 +380,7 @@ defmodule Scrapex.GenSpider do
   For the first two situations, the spider will manually awaits the
   requests instead of handle the response message in `handle_info/2`.
 
-  If one of the `parse/2` callbacks wants to stop the spider, this
+  If one of the `parse/1` callbacks wants to stop the spider, this
   function will still return partial data if any, and then stops the
   spider.
 
@@ -355,19 +394,8 @@ defmodule Scrapex.GenSpider do
     GenServer.call(spider, {:export, format, override})
   end
 
-  @doc """
-  Makes an asynchronous request to a URL with a callback.
-  """
-  def request(url, callback) do
-    Request.async(fn -> 
-      url
-      |> do_request()
-      |> callback.()
-    end)
-  end
-
-  @spec await(Request.t) :: any
-  def await(request), do: Request.await(request)
+  defdelegate request(url, callback), to: Request, as: :async
+  defdelegate await(request), to: Request
 
   # GenServer callbacks
 
@@ -375,6 +403,7 @@ defmodule Scrapex.GenSpider do
     spider = %GenSpider{  module: module, options: opts, 
                           timer: :erlang.make_ref()}
     urls = opts[:urls] || []
+
     # Set an empty data set with each URLs as keys.
     data = Enum.map(urls, &({&1, nil}))
 
@@ -418,7 +447,7 @@ defmodule Scrapex.GenSpider do
       spider.requests
       |> Enum.reduce_while(spider, fn(request, spider) ->
         ref = request.ref
-        response = Request.await(request)
+        response = Request.await(request, :infinity)
         case handle_info({ref, response}, spider) do
           {:noreply, spider} ->
             {:cont, spider}
@@ -497,75 +526,94 @@ defmodule Scrapex.GenSpider do
     options = spider.options
     urls = options[:urls] || []
 
-    Logger.debug "Crawling #{Enum.join(urls, ", ")}"
+    args = [urls, spider.state]
+    spider = case call(:start_requests, spider, args) do
+      {:ok, requests, state} ->
+        # `requests` can also be a `Stream`.
+        %{spider | requests: requests, state: state}
+    end
 
-    requests = urls
-    |> Enum.map(&Request.async(fn -> do_request(&1) end))
-
-    {:noreply, %{spider | requests: requests}}
+    {:noreply, spider}
   end
 
   @doc """
-  Called when a request is completed.
+  Called when a scrape request is completed.
 
-  When a request is completed, i.e. receives the response, this process
-  receives a message with the result. We then call the `parse` function
-  of the callback module.
+  When a request is completed, i.e. receives the response, and parsed, 
+  this process receives a message with the result.
 
   If this is for the last request, it sets a new timer if needed.
   """
-  def handle_info({ref, {:ok, response}}, spider) do
-    url = response.url
-    Logger.debug "Got data from #{url}"
+  # def handle_info({ref, {:ok, %Request{}=req}}, spider) do
+  #   # BUG: Spider can't await for request that was spawned in other req.
+  #   data = Request.await(req)
+  #   handle_info({ref, {:ok, data}}, spider)
+  # end
 
-    requests = spider.requests
+  # def handle_info({ref, {:ok, requests = [%Request{} | _]}}, spider) do
+  #   data = Stream.map(requests, &Request.await(&1))
+  #   |> Enum.concat
+  #   handle_info({ref, {:ok, data}}, spider)
+  # end
+
+  def handle_info({ref, {:ok, data}}, spider) do
     # Remove this request from the list.
-    requests = Enum.filter(requests, &(&1.ref !== ref))
+    {request, requests} = spider.requests
+    |> Enum.reduce({nil, []}, fn(request, {req, requests}) ->
+      case request.ref === ref do
+        true -> {request, requests}
+        false -> {req, requests ++ [request]}
+      end
+    end)
     spider = %{spider | requests: requests}
 
-    case apply(spider.module, :parse, [response, spider.state]) do
-      {:stop, reason, new_state} ->
-        Logger.debug "Spider is stopped with reason #{reason}"
-        {:stop, :normal, %{spider | state: new_state}}
+    url = request.url
+    Logger.debug "Got data from #{url}"
 
-      {:ok, data, new_state} ->
-        data = case data do
-          %Request{} -> Request.await(data)
-          [%Request{}|_] -> 
-            Stream.map(data, &Request.await(&1))
-            |> Enum.concat
-          _ -> data
-        end
-
-        new_data = List.keystore(spider.data, url, 0, {url, data})
-        interval = spider.options[:interval]
-        spider = case length(requests) === 0 do
-          true ->
-            # Start a new crawl.
-            :erlang.cancel_timer(spider.timer)
-            timer = send_after(self, interval, :crawl)
-            %{spider | timer: timer}
-          false -> spider
-        end
-        {:noreply, %{spider | state: new_state, data: new_data}}
+    new_data = List.keystore(spider.data, url, 0, {url, data})
+    interval = spider.options[:interval]
+    spider = case length(requests) === 0 do
+      true ->
+        # Start a new crawl.
+        :erlang.cancel_timer(spider.timer)
+        timer = send_after(self, interval, :crawl)
+        %{spider | timer: timer}
+      false -> spider
     end
+
+    {:noreply, %{spider | data: new_data}}
+  end
+
+  # Return value from `parse` callback
+  def handle_info({_ref, {:stop, reason}}, spider) do
+    Logger.info "Spider is stopped with reason #{reason}"
+    {:stop, :normal, spider}
+  end
+
+  # The URL is 404, we remove it from the list to prevent requesting it
+  # the next time, and call `handle_info` with empty data so it can
+  # continue the loop.
+  def handle_info({ref, {:error, {:not_found, url}}}, spider) do
+    Logger.error("Failed to request to #{url} with 404 error")
+
+    options = spider.options
+    urls = Enum.filter(options.urls, &(&1 !== url))
+    options = Keyword.put(options, :urls, urls)
+    handle_info({ref, {:ok, []}}, %{spider| options: options})
+  end
+
+  def handle_info({ref, {:error, reason}}, spider) do
+    # Retry with backoff?
+    request = spider.requests
+    |> Enum.find(&(&1.ref === ref), %Request{})
+
+    Logger.error("Failed to request to #{request.url} with reason #{reason}")
+    # Return an empty data, and let the spider tries again next time.
+    handle_info({ref, {:ok, []}}, spider)
   end
 
   def handle_info(_info, state) do
     {:noreply, state}
-  end
-
-  defp do_request(url) do
-    Logger.debug("Do request for #{url}")
-    hackney = [follow_redirect: true]
-    case HTTPoison.get(url, [], [ hackney: hackney ]) do
-      {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
-        {:ok, %Response{url: url, body: body}}
-      {:ok, %HTTPoison.Response{status_code: 404}} ->
-        {:error, {:not_found, url}}
-      {:error, %HTTPoison.Error{reason: reason}} ->
-        {:error, reason}
-    end
   end
 
   defp send_after(_dest, nil, _message) do
@@ -573,5 +621,9 @@ defmodule Scrapex.GenSpider do
   end
   defp send_after(dest, time, message) do
     :erlang.send_after(time, dest, message)
+  end
+
+  defp call(method, %GenSpider{}=spider, args \\ nil) when is_atom(method) do
+    Kernel.apply(spider.module, method, args || [spider.state])
   end
 end
