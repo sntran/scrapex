@@ -246,6 +246,14 @@ defmodule Scrapex.Spider.WebScraper do
    {:ok, rules}
   end
 
+  def start_requests(urls, rules) do
+    requests = urls
+    |> Enum.map(fn(url) ->
+      GenSpider.request(url, &parse(&1, rules))
+    end)
+    {:ok, requests, rules}
+  end
+
   def parse(response, rules) do
     by_parent = group_by_parents(rules)
 
@@ -254,7 +262,7 @@ defmodule Scrapex.Spider.WebScraper do
     # @return: [ item ]
     |> Enum.map(&Enum.into(&1, %{}))
 
-    {:ok, results, rules}
+    {:ok, results}
   end
 
   @spec parse_level(binary, binary, %{key => [rule]}) :: [item]
@@ -287,9 +295,8 @@ defmodule Scrapex.Spider.WebScraper do
           # new key-value pair(s) if rule's selector is a link.
           case {rule["type"], rule_groups[key]} do
             {"SelectorText", _} ->
-              regex = rule["regex"]
-              case Regex.compile(rule["regex"]) do
-                {:error, reason} -> result
+              case Regex.compile(rule["regex"] || "") do
+                {:error, _reason} -> result
                 {:ok, ~r//} -> result
                 {:ok, regex} ->
                   [value|_] = Regex.run(regex, value)
@@ -300,10 +307,9 @@ defmodule Scrapex.Spider.WebScraper do
               result
             {"SelectorLink", _} ->
               [href] = extract(selector, "href")
-              url = GenSpider.Response.url_join(response, href)
-              result = [[{key, value}, {key <> "-href", url}]]
+              url = Response.url_join(response, href)
 
-              request = GenSpider.request(url, fn({:ok, response}) ->
+              request = GenSpider.request(url, fn(response) ->
                 # Get sub nodes as a tuple list.
                 parse_level(response, rule["id"], rule_groups)
               end)
