@@ -399,4 +399,35 @@ defmodule Scrapex.GenSpiderTest do
 
     assert data === HTTPoison.get!(url <> "/index.html").body
   end
+
+  defmodule StreamSpider do
+    use GenSpider
+
+    def start_requests(_urls, callback) do
+      stream = Stream.resource(
+        _start = fn() -> 
+          ["http://localhost:9090/e-commerce/static"]
+        end,
+        _next = fn
+          ([]) -> {:halt, []}
+          ([url|urls]) ->
+            {[callback.(url)], urls}
+        end,
+        _after = fn(_) -> end
+      )
+
+      {:ok, stream, callback}
+    end
+  end
+
+  test "can take a stream instead of requests list" do
+    tester = self
+    callback = fn(url) ->
+      GenSpider.request(url, fn(response) ->
+        send(tester, {:ok, [response]})
+      end)
+    end
+    GenSpider.start(StreamSpider, callback, [])
+    assert_receive({:ok, _new}, 500)
+  end
 end

@@ -532,7 +532,8 @@ defmodule Scrapex.GenSpider do
     spider = case call(:start_requests, spider, args) do
       {:ok, requests, state} ->
         # `requests` can also be a `Stream`.
-        %{spider | requests: requests, state: state}
+        %{spider |  requests: Enum.map(requests, &(&1)), 
+                    state: state}
     end
 
     {:noreply, spider}
