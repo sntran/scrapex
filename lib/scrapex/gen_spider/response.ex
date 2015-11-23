@@ -21,16 +21,20 @@ defmodule Scrapex.GenSpider.Response do
       "http://www.scrapex.com/subfolder/subsubfolder"
   """
   @spec url_join(t, binary) :: binary
+  def url_join(url, path) when is_binary(url) do
+    url_join(%Response{url: url}, path)
+  end
+
   def url_join(%Response{url: url}, "/" <> path) do
     uri = URI.parse(url)
     "#{uri.scheme}://#{uri.authority}/#{path}" 
   end
 
-  def url_join(%Response{url: url}, path) do
-    "#{url}/#{path}"
+  def url_join(%Response{url: _url}, "http" <> path) do
+    "http#{path}"
   end
 
-  def url_join(_, "http" <> path) do
-    "http#{path}"
+  def url_join(%Response{url: url}, path) do
+    "#{url}/#{path}"
   end
 end

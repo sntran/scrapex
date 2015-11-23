@@ -62,6 +62,7 @@ defmodule Scrapex.Selector do
   defp extract_text([{_, _, children}|rest], result) do
     extract_text(rest, result <> extract_text(children))
   end
+  defp extract_text(_, result), do: result
   
   defimpl Enumerable, for: __MODULE__ do
     alias Scrapex.Selector
