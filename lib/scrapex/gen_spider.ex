@@ -607,7 +607,7 @@ defmodule Scrapex.GenSpider do
   def handle_info({ref, {:error, reason}}, spider) do
     # Retry with backoff?
     request = spider.requests
-    |> Enum.find(&(&1.ref === ref), %Request{})
+    |> Enum.find(%Request{}, &(&1.ref === ref))
 
     Logger.error("Failed to request to #{request.url} with reason #{reason}")
     # Return an empty data, and let the spider tries again next time.
