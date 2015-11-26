@@ -402,6 +402,8 @@ defmodule Scrapex.GenSpider do
   # GenServer callbacks
 
   def init({module, args, opts}) do
+    # Set default timeout, used to stop spider.
+    opts = Keyword.put_new(opts, :timeout, 100)
     spider = %GenSpider{  module: module, options: opts, 
                           timer: :erlang.make_ref()}
     urls = opts[:urls] || []
@@ -471,41 +473,51 @@ defmodule Scrapex.GenSpider do
     handle_call({:export, nil, false}, from, spider)
   end
 
+  # Main handler for exporting.
   def handle_call({:export, nil, false}, _from, spider) do
     Logger.debug("Exporting data")
-    
+
+    interval = spider.options[:interval]
+
     data = 
       spider.data
       |> Enum.filter_map(fn({_,data}) -> data !== nil end, 
                         fn({_, data}) -> data end)
 
-    is_partial? = length(data) !== length(spider.data)
+    is_complete? = length(data) === length(spider.data)
     data = Enum.concat(data)
-    case is_partial? do
-      false ->
-        {:reply, data, spider}
+    case interval !== nil and is_complete? do
       true ->
+        {:reply, data, spider}
+      false ->
         {:stop, :normal, data, spider}
     end
   end
 
   def handle_call({:export, :json, override?}, from, spider) do
-    {_, data, _} = handle_call({:export, nil, override?}, from, spider)
-    {:reply, Poison.encode!(data), spider}
+    case handle_call({:export, nil, override?}, from, spider) do
+      {:reply, data, spider} ->
+        {:reply, Poison.encode!(data), spider}
+      {:stop, _, data, spider} ->
+        {:stop, :normal, Poison.encode!(data), spider}
+    end
   end
 
   def handle_call({:export, encoder, override?}, from, spider) 
   when is_function(encoder, 1) 
   do
-    {_, data, _} = handle_call({:export, nil, override?}, from, spider)
-    {:reply, encoder.(data), spider}
+    case handle_call({:export, nil, override?}, from, spider) do
+      {:reply, data, spider} ->
+        {:reply, encoder.(data), spider}
+      {:stop, _, data, spider} ->
+        {:stop, :normal, encoder.(data), spider}
+    end
   end
 
   def handle_call({:export, _format, true}, _from, spider) do
     {:reply, spider.data, spider}
   end
   
-
   @doc """
   Called when a timeout occurs, usually when to start a crawl.
 
@@ -574,16 +586,23 @@ defmodule Scrapex.GenSpider do
 
     new_data = List.keystore(spider.data, url, 0, {url, data})
     interval = spider.options[:interval]
-    spider = case length(requests) === 0 do
-      true ->
-        # Start a new crawl.
-        :erlang.cancel_timer(spider.timer)
-        timer = send_after(self, interval, :crawl)
-        %{spider | timer: timer}
-      false -> spider
-    end
+    timer = spider.timer
+    spider = %{spider | data: new_data}
 
-    {:noreply, %{spider | data: new_data}}
+    case {Enum.empty?(requests), interval} do
+      {true, nil} ->
+        timeout = spider.options[:timeout]
+        # No more request, and no interval, so we stop
+        send_after(self, timeout, {timer, {:stop, :normal}})
+        {:noreply, spider}
+      {true, _} ->
+        # No more request, but has interval, so schedule a new crawl.
+        :erlang.cancel_timer(timer)
+        timer = send_after(self, interval, :crawl)
+        {:noreply, %{spider | timer: timer}}
+      {_, _} ->
+        {:noreply, spider}
+    end
   end
 
   # Return value from `parse` callback

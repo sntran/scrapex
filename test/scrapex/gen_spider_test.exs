@@ -400,6 +400,37 @@ defmodule Scrapex.GenSpiderTest do
     assert data === HTTPoison.get!(url <> "/index.html").body
   end
 
+  test "should stop after first crawl if no interval set" do
+    url = "http://localhost:9090/e-commerce/static"
+    opts = [urls: [url]]
+    tester = self
+    callback = fn(result, _) ->
+      send(tester, {:test_result, result})
+    end
+
+    {:ok, spider} = GenSpider.start(MapSpider, callback, opts)
+    # The spider will stop after a specific timeout when it's done scraping.
+    # We call `export` immediately so it will timeout after that.
+    [%{"body" => data}] = GenSpider.export(spider)
+    refute Process.alive?(spider)
+  end
+
+  test "should also stop even when not exporting" do
+    url = "http://localhost:9090/e-commerce/static"
+    opts = [urls: [url]]
+    tester = self
+    callback = fn(result, _) ->
+      send(tester, {:test_result, result})
+    end
+
+    {:ok, spider} = GenSpider.start(MapSpider, callback, opts)
+    # The spider will stop after a specific timeout when it's done scraping.
+    assert_receive({:test_result, result}, 300)
+    # Allow some time for the spider to stop.
+    :timer.sleep(500)
+    refute Process.alive?(spider)
+  end
+
   defmodule StreamSpider do
     use GenSpider
 
