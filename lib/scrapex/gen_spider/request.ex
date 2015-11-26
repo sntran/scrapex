@@ -85,7 +85,7 @@ defmodule Scrapex.GenSpider.Request do
 
   defp do_request(url) do
     Logger.debug("Do request for #{url}")
-    hackney = [follow_redirect: true]
+    hackney = [follow_redirect: true, timeout: 30000, recv_timeout: 15000]
     case HTTPoison.get(url, [], [ hackney: hackney ]) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
         {:ok, %Response{url: url, body: body}}
