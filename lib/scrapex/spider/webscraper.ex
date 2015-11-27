@@ -299,8 +299,10 @@ defmodule Scrapex.Spider.WebScraper do
                 {:error, _reason} -> result
                 {:ok, ~r//} -> result
                 {:ok, regex} ->
-                  [value|_] = Regex.run(regex, value)
-                  [[{key, value}]]
+                  case Regex.run(regex, value) do
+                    [value|_] ->  [[{key, value}]]
+                    _ -> [[{key, nil}]]
+                  end
               end
             {"SelectorLink", nil} ->
               # Link with no child rule just returns the text value
