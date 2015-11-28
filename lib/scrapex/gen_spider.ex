@@ -390,14 +390,18 @@ defmodule Scrapex.GenSpider do
   @spec export(spider, format, boolean) :: any
   def export(spider, format \\ nil, override \\ false) do
     # Await for all the data to be collected first.
-    GenServer.call(spider, :await, :infinity)
+    __MODULE__.await(spider)
     GenServer.call(spider, {:export, format, override})
   end
 
   def request(url, callback, from \\ self) do
     Request.async(url, callback, from)
   end
-  defdelegate await(request), to: Request
+  defdelegate await(%Request{}), to: Request
+
+  def await(spider, timeout \\ :infinity) do
+    GenServer.call(spider, :await, :infinity)
+  end
 
   # GenServer callbacks
 
