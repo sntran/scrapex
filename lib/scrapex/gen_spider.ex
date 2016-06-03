@@ -239,6 +239,7 @@ defmodule Scrapex.GenSpider do
   defmacro __using__(_) do
     quote location: :keep do
       @behaviour GenSpider
+      require Logger
 
       @start_urls []
 
@@ -397,10 +398,10 @@ defmodule Scrapex.GenSpider do
   def request(url, callback, from \\ self) do
     Request.async(url, callback, from)
   end
-  defdelegate await(%Request{}), to: Request
 
+  def await(request = %Request{}), do: Request.await(request)
   def await(spider, timeout \\ :infinity) do
-    GenServer.call(spider, :await, :infinity)
+    GenServer.call(spider, :await, timeout)
   end
 
   # GenServer callbacks
@@ -543,6 +544,7 @@ defmodule Scrapex.GenSpider do
   def handle_info(:crawl, spider) do
     options = spider.options
     urls = options[:urls] || []
+    Logger.debug("Starts a crawl for #{urls}")
 
     args = [urls, spider.state]
     spider = case call(:start_requests, spider, args) do
@@ -648,7 +650,10 @@ defmodule Scrapex.GenSpider do
     :erlang.send_after(time, dest, message)
   end
 
-  defp call(method, %GenSpider{}=spider, args \\ nil) when is_atom(method) do
-    Kernel.apply(spider.module, method, args || [spider.state])
+  defp call(method, %GenSpider{}=spider, nil) when is_atom(method) do
+    call(method, spider, [spider.state])
+  end
+  defp call(method, %GenSpider{}=spider, args) when is_atom(method) do
+    Kernel.apply(spider.module, method, args)
   end
 end
