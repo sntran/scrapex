@@ -13,7 +13,7 @@ defmodule Scrapex.Mixfile do
      """,
      source_url: "https://bitbucket.org/inhuman/scrapex",
      homepage_url: "https://bitbucket.org/inhuman/scrapex/overview",
-     elixir: "~> 1.1.1",
+     elixir: "~> 1.2",
      escript: [main_module: Scrapex],
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,

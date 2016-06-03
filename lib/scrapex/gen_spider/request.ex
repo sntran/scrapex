@@ -21,12 +21,14 @@ defmodule Scrapex.GenSpider.Request do
 
     * `:pid` - the process reference of the request process.
 
-    * `:ref` - the request monitor reference
+    * `:ref` - the request monitor reference.
 
-    * `:url` - the url to make request to
+    * `:owner` - the PID of the process that started the request.
+
+    * `:url` - the url to make request to.
   """
-  defstruct pid: nil, ref: nil, url: ""
-  @type t :: %__MODULE__{pid: pid, ref: reference, url: binary}
+  defstruct pid: nil, ref: nil, owner: nil, url: ""
+  @type t :: %__MODULE__{pid: pid, ref: reference, owner: pid, url: binary}
 
   @type url :: binary
 
@@ -46,10 +48,10 @@ defmodule Scrapex.GenSpider.Request do
   @spec async(url, fun, pid) :: t
   def async(url, callback, from \\ self) when is_pid(from) do
     mfa = {:erlang, :apply, [&request/2, [url, callback]]}
-    pid = :proc_lib.spawn_link(Task.Supervised, :async, [from, get_info(from), mfa])
+    pid = Task.Supervised.spawn_link(from, get_info(from), mfa)
     ref = Process.monitor(pid)
     send(pid, {from, ref})
-    %Request{url: url, pid: pid, ref: ref}
+    %Request{url: url, pid: pid, ref: ref, owner: from}
   end
 
   @doc """
@@ -60,8 +62,8 @@ defmodule Scrapex.GenSpider.Request do
   same reason as the request.
   """
   @spec await(t, timeout) :: term
-  def await(%Request{pid: pid, ref: ref}, timeout \\ 5000) do
-    Task.await(%Task{pid: pid, ref: ref}, timeout)
+  def await(%Request{pid: pid, ref: ref, owner: owner}, timeout \\ 5000) do
+    Task.await(%Task{pid: pid, ref: ref, owner: owner}, timeout)
   end
 
   defp get_info(pid) do
