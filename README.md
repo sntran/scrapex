@@ -1,6 +1,8 @@
 Scrapex
 =======
 
+[![Join the chat at https://gitter.im/sntran/scrapex](https://badges.gitter.im/sntran/scrapex.svg)](https://gitter.im/sntran/scrapex?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 An open source and collaborative framework for extracting the data you need from websites. In a fast, simple, yet extensible way.
 
 ## Features
